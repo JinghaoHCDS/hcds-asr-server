@@ -22,34 +22,35 @@ from asr_server.adapters.base import (
     TranscriptionTimings,
 )
 from asr_server.errors import AsrError
+from asr_server.observability import PROTOCOL_VERSION, safe_exception
+from asr_server.registry import ALIGNER_SOURCE, MODEL_SOURCES
 from asr_server.workers.audio import audio_duration_seconds, materialized_audio_path
 from asr_server.workers.transport import ProcessRpcTransport
+from asr_server.workers.codec import (
+    optional_int as _optional_int, result_to_payload as _result_to_payload,
+    result_from_payload, error_to_payload as _error_to_payload, validate_request_envelope,
+)
 
 
-MODEL_REPOS = {
-    "qwen3-asr-0.6b": "Qwen/Qwen3-ASR-0.6B-hf",
-    "qwen3-asr-1.7b": "Qwen/Qwen3-ASR-1.7B-hf",
-}
-MODEL_REVISIONS = {
-    "qwen3-asr-0.6b": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
-    "qwen3-asr-1.7b": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
-}
-ALIGNER_REPO = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
-ALIGNER_REVISION = "c07281df297b9905d24a508279258cccf987a064"
+MODEL_REPOS = {model_id: source[0] for model_id, source in MODEL_SOURCES.items() if model_id.startswith("qwen3-asr-")}
+MODEL_REVISIONS = {model_id: source[1] for model_id, source in MODEL_SOURCES.items() if model_id in MODEL_REPOS}
+ALIGNER_REPO, ALIGNER_REVISION = ALIGNER_SOURCE
 logger = logging.getLogger(__name__)
 
 
-def _qwen_worker_main(conn: Connection, model_id: str, enable_alignment: bool) -> None:
+def _qwen_worker_main(conn: Connection, model_id: str, enable_alignment: bool,
+                      repository: str | None = None, revision: str | None = None) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    backend = _QwenWorkerBackend(model_id, enable_alignment=enable_alignment)
+    backend = _QwenWorkerBackend(model_id, enable_alignment=enable_alignment, repository=repository, revision=revision)
     try:
         while True:
             request = conn.recv()
             request_id = request.get("id")
             op = request.get("op")
             try:
+                validate_request_envelope(request)
                 if op == "ping":
-                    conn.send({"id": request_id, "ok": True, "result": {"pid": os.getpid()}})
+                    conn.send({"id": request_id, "ok": True, "result": {"pid": os.getpid(), "protocol_version": PROTOCOL_VERSION}})
                     continue
                 if op == "load":
                     _run_async(
@@ -103,15 +104,15 @@ def _qwen_worker_main(conn: Connection, model_id: str, enable_alignment: bool) -
                     return
                 raise AsrError(400, "bad_request", f"unknown Qwen worker operation: {op}")
             except AsrError as exc:
-                conn.send({"id": request_id, "ok": False, "error": _error_to_payload(exc)})
+                conn.send({"id": request_id, "ok": False, "error": _error_to_payload(exc), "diagnostics": safe_exception(exc)})
             except Exception as exc:
                 error = AsrError(
                     503,
                     "inference_failed",
                     "Qwen worker operation failed",
-                    {"operation": str(op), "error_type": type(exc).__name__, "message": str(exc)[-500:]},
+                    {"operation": str(op), "error_type": type(exc).__name__},
                 )
-                conn.send({"id": request_id, "ok": False, "error": _error_to_payload(error)})
+                conn.send({"id": request_id, "ok": False, "error": _error_to_payload(error), "diagnostics": safe_exception(exc)})
     except EOFError:
         return
     finally:
@@ -127,124 +128,8 @@ def _run_async(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-def _optional_int(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        return int(value)
-    raise TypeError(f"expected optional int value, got {type(value).__name__}")
-
-
-def _result_to_payload(result: TranscriptionResult) -> dict[str, object]:
-    return {
-        "text": result.text,
-        "duration": result.duration,
-        "language": result.language,
-        "warnings": result.warnings,
-        "segments": [segment.to_api() for segment in result.segments],
-        "timestamps": [item.to_api() for item in result.timestamps],
-        "timings": {
-            "total_ms": result.timings.total_ms,
-            "load_ms": result.timings.load_ms,
-            "decode_ms": result.timings.decode_ms,
-            "inference_ms": result.timings.inference_ms,
-            "postprocess_ms": result.timings.postprocess_ms,
-        },
-        "generation": result.generation.to_api(),
-        "context": result.context.to_api(),
-    }
-
-
 def _result_from_payload(payload: Any) -> TranscriptionResult:
-    timings = payload.get("timings", {})
-    generation = payload.get("generation", {})
-    context = payload.get("context", {})
-    return TranscriptionResult(
-        text=str(payload["text"]),
-        duration=float(payload["duration"]),
-        language=str(payload["language"]),
-        warnings=[str(warning) for warning in payload.get("warnings", [])],
-        segments=[
-            TranscriptionSegment(
-                start=float(segment["start"]),
-                end=float(segment["end"]),
-                speaker=str(segment["speaker"]) if segment.get("speaker") is not None else None,
-                text=str(segment["text"]),
-                source_speaker=(
-                    str(segment["source_speaker"])
-                    if segment.get("source_speaker") is not None
-                    else None
-                ),
-                speaker_resolution=(
-                    str(segment["speaker_resolution"])
-                    if segment.get("speaker_resolution") is not None
-                    else None
-                ),
-            )
-            for segment in payload.get("segments", [])
-        ],
-        timestamps=[
-            TimestampItem(
-                text=str(item["text"]),
-                start=float(item["start"]),
-                end=float(item["end"]),
-                granularity=str(item["granularity"]),
-                source=str(item.get("source", "qwen3_forced_aligner")),
-                status=str(item.get("status", "aligned")),
-            )
-            for item in payload.get("timestamps", [])
-        ],
-        timings=TranscriptionTimings(
-            total_ms=float(timings.get("total_ms", 0.0)),
-            load_ms=float(timings.get("load_ms", 0.0)),
-            decode_ms=float(timings.get("decode_ms", 0.0)),
-            inference_ms=float(timings.get("inference_ms", 0.0)),
-            postprocess_ms=float(timings.get("postprocess_ms", 0.0)),
-        ),
-        generation=GenerationMetrics(
-            prompt_tokens=_optional_int(generation.get("prompt_tokens")),
-            generated_tokens=_optional_int(generation.get("generated_tokens")),
-            max_new_tokens=_optional_int(generation.get("max_new_tokens")),
-            peak_vram_allocated_mb=_optional_float(generation.get("peak_vram_allocated_mb")),
-            segment_coverage_end_seconds=_optional_float(generation.get("segment_coverage_end_seconds")),
-            segment_coverage_ratio=_optional_float(generation.get("segment_coverage_ratio")),
-            audible_speech_end_seconds=_optional_float(generation.get("audible_speech_end_seconds")),
-            uncovered_speech_intervals=_optional_int(generation.get("uncovered_speech_intervals")),
-            truncated=bool(generation.get("truncated", False)),
-            finish_reason=str(generation["finish_reason"]) if generation.get("finish_reason") is not None else None,
-        ),
-        context=ContextApplication(
-            requested=bool(context.get("requested", False)),
-            applied=bool(context.get("applied", False)),
-            method=str(context["method"]) if context.get("method") is not None else None,
-            input_chars=int(context.get("input_chars", 0)),
-            used_chars=int(context.get("used_chars", 0)),
-            hotword_count=int(context.get("hotword_count", 0)),
-            truncated=bool(context.get("truncated", False)),
-            ignored_reason=str(context["ignored_reason"]) if context.get("ignored_reason") is not None else None,
-        ),
-    )
-
-
-def _optional_float(value: object) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, int | float):
-        return float(value)
-    if isinstance(value, str):
-        return float(value)
-    raise TypeError(f"expected optional float value, got {type(value).__name__}")
-
-
-def _error_to_payload(error: AsrError) -> dict[str, object]:
-    return {
-        "status_code": error.status_code,
-        "code": error.code,
-        "message": error.message,
-        "details": error.details,
-    }
+    return result_from_payload(payload, default_timestamp_source="qwen3_forced_aligner")
 
 
 class QwenAsrAdapter:
@@ -255,6 +140,8 @@ class QwenAsrAdapter:
         model_id: str,
         *,
         enable_alignment: bool = False,
+        repository: str | None = None,
+        revision: str | None = None,
         startup_timeout_seconds: float = 30.0,
         load_timeout_seconds: float = 900.0,
         inference_timeout_seconds: float = 3600.0,
@@ -268,7 +155,7 @@ class QwenAsrAdapter:
         self._transport = ProcessRpcTransport(
             name=f"Qwen {model_id}",
             target=_qwen_worker_main,
-            target_args=(model_id, enable_alignment),
+            target_args=(model_id, enable_alignment, repository, revision),
             startup_timeout_seconds=startup_timeout_seconds,
         )
 
@@ -357,8 +244,11 @@ class QwenAsrAdapter:
 class _QwenWorkerBackend:
     """In-process Qwen3-ASR backend used only inside the worker process."""
 
-    def __init__(self, model_id: str, *, enable_alignment: bool = False) -> None:
+    def __init__(self, model_id: str, *, enable_alignment: bool = False,
+                 repository: str | None = None, revision: str | None = None) -> None:
         self.model_id = model_id
+        self._repository = repository or MODEL_REPOS.get(model_id)
+        self._revision = revision or MODEL_REVISIONS.get(model_id)
         self.loaded_backend: str | None = None
         self._model: Any | None = None
         self._enable_alignment = enable_alignment
@@ -373,8 +263,9 @@ class _QwenWorkerBackend:
         torch = self._assert_cuda_torch()
         torch_dtype = self._resolve_torch_dtype(torch, dtype)
         processor_cls, model_cls = self._import_hf_native_transformers()
-        repo_id = MODEL_REPOS[self.model_id]
-        revision = MODEL_REVISIONS[self.model_id]
+        repo_id, revision = self._repository, self._revision
+        if not repo_id or not revision:
+            raise AsrError(404, "model_not_found", "Qwen model source is not configured")
         if self._model is not None:
             await self.unload(cuda_empty_cache=True)
         try:

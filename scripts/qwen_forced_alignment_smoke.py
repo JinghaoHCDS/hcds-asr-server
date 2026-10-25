@@ -20,8 +20,10 @@ from scripts.qwen_asr_backend_smoke import (
 )
 
 
-ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
-ALIGNER_REVISION = "c07281df297b9905d24a508279258cccf987a064"
+from asr_server.registry import ALIGNER_SOURCE
+from asr_server.adapters.qwen import _qwen_prefill_chat_template
+
+ALIGNER_MODEL, ALIGNER_REVISION = ALIGNER_SOURCE
 
 
 def run(args: argparse.Namespace) -> None:
@@ -41,13 +43,14 @@ def run(args: argparse.Namespace) -> None:
         .to(args.device)
         .eval()
     )
+    requested_language = normalize_language(args.language)
     request: dict[str, object] = {
         "audio": str(args.audio),
-        "language": normalize_language(args.language),
+        "language": requested_language,
     }
     if args.prompt:
         request["prompt"] = args.prompt
-    if normalize_language(args.language) is None:
+    if requested_language is None:
         messages: list[dict[str, object]] = []
         if args.prompt:
             messages.append(
@@ -63,13 +66,14 @@ def run(args: argparse.Namespace) -> None:
             return_dict=True,
         ).to(asr_model.device, asr_model.dtype)
     else:
+        request["chat_template"] = _qwen_prefill_chat_template(processor)
         inputs = processor.apply_transcription_request(**request).to(asr_model.device, asr_model.dtype)
     with torch.inference_mode():
         output_ids = asr_model.generate(**inputs, max_new_tokens=args.max_new_tokens, do_sample=False)
     generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
     parsed = processor.decode(generated_ids, return_format="parsed")[0]
     transcript = parsed_text(parsed)
-    language = parsed_language(parsed)
+    language = parsed_language(parsed) or requested_language or ""
     if not transcript.strip():
         raise RuntimeError("ASR transcript is empty; forced alignment was not attempted")
 

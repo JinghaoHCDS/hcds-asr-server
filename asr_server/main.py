@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
+from uuid import uuid4
 import socket
 import importlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, cast
 
-from fastapi import Body, FastAPI, File, Form, UploadFile
+from fastapi import Body, FastAPI, File, Form, UploadFile, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,16 +18,17 @@ from fastapi.staticfiles import StaticFiles
 from asr_server import __version__
 from asr_server.api.schemas import LoadRequest, UnloadRequest
 from asr_server.adapters.base import AsrAdapter
-from asr_server.adapters.mock import MockAsrAdapter
-from asr_server.adapters.qwen import QwenAsrAdapter
 from asr_server.audio.preprocess import probe_audio_duration_path_async
 from asr_server.audio.workspace import WorkspaceManager
 from asr_server.auth import BearerAuthMiddleware, GatewayApp
+from asr_server.admission import AdmissionMiddleware, AdmissionRoute, RequestContextMiddleware
+from asr_server.observability import configure_logging, current_context, emit, safe_exception
 from asr_server.config import Settings, load_settings
 from asr_server.errors import AsrError, asr_error_handler, validation_error_handler
 from asr_server.jobs import JobManager
 from asr_server.lifecycle import ModelLifecycleManager
-from asr_server.registry import MOSS_MODEL_ID, Backend, default_models
+from asr_server.registry import Backend, ModelDefinition, default_models
+from asr_server.engines import EngineRegistration, create_registered_adapter
 from asr_server.transcription import (
     SYNC_JOB_THRESHOLD_SECONDS,
     TranscriptionRequest,
@@ -70,35 +73,34 @@ def mcp_tutorial() -> str:
         return "# MCP setup tutorial\n\nThe MCP tutorial file is unavailable in this deployment.\n"
 
 
-def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 0.0) -> FastAPI:
+def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 0.0, *,
+               models: Mapping[str, ModelDefinition] | None = None,
+               engines: Mapping[str, EngineRegistration] | None = None) -> FastAPI:
     app_settings = settings or load_settings()
+    definitions = dict(models) if models is not None else default_models(
+        app_settings.default_model, enable_moss=app_settings.enable_moss,
+        enable_qwen_alignment=app_settings.enable_qwen_alignment,
+    )
 
     def adapter_factory(model_id: str) -> AsrAdapter:
-        if app_settings.adapter == "mock":
-            return MockAsrAdapter(delay_seconds=adapter_delay_seconds)
-        if model_id == MOSS_MODEL_ID:
-            from asr_server.adapters.moss import MossTranscribeDiarizeAdapter
-
-            return MossTranscribeDiarizeAdapter(
-                model_id,
-                startup_timeout_seconds=app_settings.worker_startup_timeout_seconds,
-                load_timeout_seconds=app_settings.worker_load_timeout_seconds,
-                inference_timeout_seconds=app_settings.worker_inference_timeout_seconds,
-                shutdown_timeout_seconds=app_settings.worker_shutdown_timeout_seconds,
-            )
-        return QwenAsrAdapter(
-            model_id,
-            enable_alignment=app_settings.enable_qwen_alignment,
-            startup_timeout_seconds=app_settings.worker_startup_timeout_seconds,
-            load_timeout_seconds=app_settings.worker_load_timeout_seconds,
-            inference_timeout_seconds=app_settings.worker_inference_timeout_seconds,
-            shutdown_timeout_seconds=app_settings.worker_shutdown_timeout_seconds,
-        )
+        return create_registered_adapter(definitions[model_id], app_settings, engines=engines,
+                                         adapter_delay_seconds=adapter_delay_seconds)
 
     @asynccontextmanager
     async def lifespan(lifespan_app: FastAPI) -> AsyncIterator[None]:
         job_manager: JobManager = lifespan_app.state.job_manager
         manager: ModelLifecycleManager = lifespan_app.state.manager
+        logging_runtime = configure_logging(level=app_settings.log_level, log_format=app_settings.log_format, log_dir=app_settings.log_dir)
+        async def sample_gpu() -> None:
+            while True:
+                if app_settings.adapter != "mock":
+                    try:
+                        lifespan_app.state.gpu_snapshot = await asyncio.to_thread(gpu_health)
+                    except Exception as exc:
+                        emit("health.gpu_snapshot_failed", diagnostics=safe_exception(exc))
+                lifespan_app.state.gpu_snapshot_at = datetime.now(timezone.utc).isoformat()
+                await asyncio.sleep(30)
+        gpu_sampler = asyncio.create_task(sample_gpu())
         await job_manager.start()
         try:
             if app_settings.workbench_enabled:
@@ -111,6 +113,12 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
             await manager.shutdown()
             if app_settings.workbench_enabled:
                 lifespan_app.state.workbench.close()
+            gpu_sampler.cancel()
+            try:
+                await gpu_sampler
+            except asyncio.CancelledError:
+                pass
+            logging_runtime.close()
 
     app = GatewayApp(
         title="WSL ASR Server",
@@ -118,19 +126,20 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         description=docs_description(),
         lifespan=lifespan,
     )
+    app.router.route_class = AdmissionRoute
+    app.add_middleware(AdmissionMiddleware, settings=app_settings)
     app.add_exception_handler(AsrError, cast(Any, asr_error_handler))
     app.add_exception_handler(RequestValidationError, cast(Any, validation_error_handler))
     if app_settings.api_token:
         app.add_middleware(BearerAuthMiddleware, token=app_settings.api_token)
+    app.add_middleware(RequestContextMiddleware)
     app.state.manager = ModelLifecycleManager(
-        default_models(
-            app_settings.default_model,
-            enable_moss=app_settings.enable_moss,
-            enable_qwen_alignment=app_settings.enable_qwen_alignment,
-        ),
+        definitions,
         adapter_factory,
         idle_unload_seconds=app_settings.idle_unload_seconds,
     )
+    app.state.gpu_snapshot = {"available": False, "name": None, "vram_total_mb": None}
+    app.state.gpu_snapshot_at = None
     app.state.settings = app_settings
     app.state.workspace_manager = WorkspaceManager(app_settings)
     app.state.job_manager = JobManager(app.state.manager, app_settings)
@@ -141,7 +150,8 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
             "status": "ok",
             "version": __version__,
             "host": socket.gethostname(),
-            "gpu": gpu_health(),
+            "gpu": app.state.gpu_snapshot,
+            "gpu_snapshot_at": app.state.gpu_snapshot_at,
         }
 
     @app.get("/docs/mcp", response_class=PlainTextResponse, tags=["documentation"])
@@ -165,12 +175,14 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         request: Annotated[LoadRequest, Body()] = LoadRequest(),
     ) -> dict[str, object]:
         manager: ModelLifecycleManager = app.state.manager
-        return await manager.load_model(
-            model_id,
-            backend=request.backend,
-            device=request.device,
-            dtype=request.dtype,
-        )
+        # Validate capability before spending a queue slot.
+        manager.resolve_backend(manager.runtime_for(model_id), request.backend)
+        await app.state.job_manager.start()
+        return cast(dict[str, object], await app.state.job_manager.scheduler.wait(
+            "load_" + uuid4().hex,
+            lambda: manager.load_model(model_id, backend=request.backend, device=request.device, dtype=request.dtype),
+            kind="load",
+        ))
 
     @app.delete("/v1/models/{model_id}")
     async def unload_model(
@@ -189,6 +201,7 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
 
     @app.post("/v1/audio/transcriptions", response_model=None)
     async def transcribe(
+        raw_request: Request,
         file: Annotated[UploadFile, File()],
         model: Annotated[str | None, Form()] = None,
         language: Annotated[str, Form()] = "auto",
@@ -252,14 +265,32 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
                 )
                 transferred = True
                 return JSONResponse(status_code=202, content=payload)
-            result = await run_transcription_path(
-                workspace.upload_path,
-                workspace=workspace.root,
-                manager=manager,
-                settings=app_settings,
-                request=request,
-                validated=validated,
-            )
+            await app.state.job_manager.start()
+            execution = current_context()
+            async def run_sync() -> dict[str, object]:
+                return await run_transcription_path(
+                    workspace.upload_path, workspace=workspace.root, manager=manager,
+                    settings=app_settings, request=request, validated=validated,
+                    cancel_event=execution.cancel_event, owner_workspace=workspace,
+                )
+            pending = asyncio.create_task(app.state.job_manager.scheduler.wait(
+                "sync_" + uuid4().hex, run_sync, on_cancel=execution.cancel_event.set,
+            ))
+            async def disconnect() -> None:
+                while not pending.done():
+                    if await raw_request.is_disconnected():
+                        pending.cancel()
+                        return
+                    await asyncio.sleep(0.1)
+            watcher = asyncio.create_task(disconnect())
+            try:
+                result = cast(dict[str, object], await pending)
+            finally:
+                watcher.cancel()
+                try:
+                    await watcher
+                except asyncio.CancelledError:
+                    pass
         finally:
             if not transferred:
                 await workspace.cleanup()
@@ -320,7 +351,7 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
                 content_type=file.content_type,
                 request=request,
             )
-        except Exception:
+        except BaseException:
             await workspace.cleanup()
             raise
 

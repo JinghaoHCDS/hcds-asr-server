@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -11,11 +12,13 @@ from asr_server.adapters.base import AudioInput, AudioPath, TranscriptionResult
 from asr_server.audio.merger import ChunkLike, merge_transcription_results
 from asr_server.audio.timing import timing_analysis
 from asr_server.audio.metadata import inspect_audio, inspect_audio_path
-from asr_server.audio.preprocess import normalize_audio_path_to_wav_async, normalize_audio_to_wav
+from asr_server.audio.preprocess import NormalizedAudioPath, normalize_audio_path_to_wav_async, normalize_audio_to_wav
+from asr_server.audio.assets import NormalizedAudioAsset
+from asr_server.observability import current_context, emit
 from asr_server.audio.splitter import PathSplitResult, SplitCancelled, SplitResult, split_audio, split_audio_path
 from asr_server.config import Settings
 from asr_server.context import PreparedContext, prepare_context
-from asr_server.audio.workspace import validate_workspace_limits
+from asr_server.audio.workspace import AudioWorkspace, validate_workspace_limits
 from asr_server.errors import AsrError
 from asr_server.diarization.anchor_replay import AnchorReplaySequence
 from asr_server.execution import ExecutionPlan, ModelExecutionPolicy
@@ -122,12 +125,21 @@ def validate_transcription_request(
         raise AsrError(400, "bad_request", f"unsupported purpose: {request.purpose}")
     if request.pause_threshold_seconds < 0.2 or request.pause_threshold_seconds > 10.0:
         raise AsrError(400, "bad_request", "pause_threshold_seconds must be between 0.2 and 10")
+    for name, value in (("max_chunk_seconds", request.max_chunk_seconds), ("overlap_seconds", request.overlap_seconds), ("pause_threshold_seconds", request.pause_threshold_seconds)):
+        if value is not None and not math.isfinite(value):
+            raise AsrError(400, "bad_request", f"{name} must be finite")
     selected_model = request.model or manager.model_for_purpose(request.purpose)
     runtime = manager.runtime_for(selected_model)
+    if runtime.rejecting_new_requests or runtime.status in {"unloading", "unloading_scheduled"}:
+        raise AsrError(409, "model_unloading_scheduled", "model is scheduled for unloading")
     resolved_backend = manager.resolve_backend(runtime, request.backend)
+    if not runtime.definition.capabilities.transcription:
+        raise AsrError(422, "capability_not_supported", "model does not support transcription")
+    if (request.context or request.hotwords) and not runtime.definition.capabilities.context_prompt:
+        raise AsrError(422, "capability_not_supported", "model does not support context prompting")
+    if not runtime.definition.supports_pipeline(request.quality_profile):
+        raise AsrError(422, "capability_not_supported", "model does not support the requested pipeline")
     if request.quality_profile == "quality_v1":
-        if not selected_model.startswith("qwen3-asr-"):
-            raise AsrError(422, "capability_not_supported", "quality_v1 requires a Qwen ASR model")
         if not runtime.definition.capabilities.forced_alignment:
             raise AsrError(422, "capability_not_supported", "quality_v1 requires enabled Qwen forced alignment")
         if request.quality_chunk_seconds is not None and request.quality_chunk_seconds not in {30, 60, 90, 120, 180}:
@@ -196,6 +208,7 @@ async def run_transcription(
     after_chunk: AfterChunkCallback | None = None,
 ) -> dict[str, object]:
     checked = validated or validate_transcription_request(manager, request)
+    cancel_event = current_context().cancel_event
     if request.quality_profile == "quality_v1":
         import tempfile
 
@@ -235,6 +248,7 @@ async def run_transcription(
             hard_chunk_seconds=plan.hard_chunk_seconds,
         )
     )
+    emit("split.completed", strategy=split.strategy, chunk_count=len(split.chunks))
     split = replace(
         split,
         requested_strategy=request.split_strategy,
@@ -253,12 +267,27 @@ async def run_transcription(
                 "chunk_windows": [(chunk.start, chunk.end) for chunk in split.chunks],
             },
         )
-    effective_before_chunk = before_chunk
-    effective_after_chunk = after_chunk
+    async def guarded_before_chunk(chunk_index: int, total_chunks: int) -> None:
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        emit("chunk.started", chunk_index=chunk_index, total_chunks=total_chunks)
+        if before_chunk is not None:
+            await before_chunk(chunk_index, total_chunks)
+
+    async def guarded_after_chunk(chunk_index: int, total_chunks: int, result: TranscriptionResult) -> None:
+        emit("chunk.completed", chunk_index=chunk_index, total_chunks=total_chunks,
+             duration_ms=result.timings.inference_ms, generated_tokens=result.generation.generated_tokens)
+        if after_chunk is not None:
+            await after_chunk(chunk_index, total_chunks, result)
+
+    effective_before_chunk: BeforeChunkCallback | None = guarded_before_chunk
+    effective_after_chunk: AfterChunkCallback | None = guarded_after_chunk
     if plan.execution_mode == "native_long_form":
         effective_after_chunk = None
 
         async def native_before_chunk(_chunk_index: int, _total_chunks: int) -> None:
+            if cancel_event.is_set():
+                raise asyncio.CancelledError
             if stage_callback is not None:
                 await stage_callback("transcribing", {"percent": 5.0})
 
@@ -340,8 +369,14 @@ async def run_transcription_path(
     before_chunk: BeforeChunkCallback | None = None,
     after_chunk: AfterChunkCallback | None = None,
     checkpoint_dir: Path | None = None,
+    normalized_asset: NormalizedAudioAsset | None = None,
+    cancel_event: threading.Event | None = None,
+    owner_workspace: AudioWorkspace | None = None,
 ) -> dict[str, object]:
     checked = validated or validate_transcription_request(manager, request)
+    cancel_event = cancel_event or current_context().cancel_event
+    if cancel_event.is_set():
+        raise asyncio.CancelledError
     if request.quality_profile == "quality_v1":
         from asr_server.quality.pipeline import run_quality_transcription
 
@@ -349,14 +384,31 @@ async def run_transcription_path(
             upload_path, workspace=workspace, manager=manager, settings=settings,
             request=request, checked=checked, stage_callback=stage_callback,
             before_chunk=before_chunk, after_chunk=after_chunk, checkpoint_dir=checkpoint_dir,
+            normalized_asset=normalized_asset, cancel_event=cancel_event, owner_workspace=owner_workspace,
         )
     if stage_callback is not None:
         await stage_callback("preprocessing", {"percent": 1.0})
-    normalized = await normalize_audio_path_to_wav_async(
-        upload_path,
-        workspace / "normalized.wav",
-        timeout_seconds=settings.ffmpeg_timeout_seconds,
-    )
+    if normalized_asset is not None:
+        await asyncio.to_thread(normalized_asset.validate, spec=manager.runtime_for(checked.selected_model).definition.audio_spec)
+        normalized = NormalizedAudioPath(normalized_asset.path, 0.0, normalized_asset)
+        emit("media.reused", output_bytes=normalized_asset.size_bytes)
+    else:
+        from asr_server.audio.workspace import remaining_workspace_output_bytes
+        budget = await asyncio.to_thread(remaining_workspace_output_bytes, workspace, settings,
+            exclude=(checkpoint_dir,) if checkpoint_dir else (), output_path=workspace / "normalized.wav")
+        lease = None
+        if owner_workspace is not None:
+            spec = manager.runtime_for(checked.selected_model).definition.audio_spec
+            budget = min(budget, int(21600 * spec.bytes_per_second) + 44)
+            lease = await owner_workspace._manager.reserve_resource(budget, workspace)
+            owner_workspace.resource_leases.append(lease)
+        normalized = await normalize_audio_path_to_wav_async(
+            upload_path, workspace / "normalized.wav", timeout_seconds=settings.ffmpeg_timeout_seconds,
+            max_output_bytes=budget, cancel_event=cancel_event, resource_lease=lease,
+            spec=manager.runtime_for(checked.selected_model).definition.audio_spec,
+        )
+        if lease is not None:
+            await lease.release_unused()
     await asyncio.to_thread(validate_workspace_limits, workspace, settings)
     metadata = await asyncio.to_thread(inspect_audio_path, normalized.path)
     plan = checked.execution_policy.plan(
@@ -368,7 +420,7 @@ async def run_transcription_path(
     plan = _anchor_compatible_plan(plan, request.speaker_resolution)
     if stage_callback is not None:
         await stage_callback("splitting", {"percent": 3.0})
-    split_cancel = threading.Event()
+    split_cancel = cancel_event
     split_operation = asyncio.create_task(
         asyncio.to_thread(
             split_audio_path,
@@ -389,6 +441,7 @@ async def run_transcription_path(
         except SplitCancelled:
             pass
         raise
+    emit("split.completed", strategy=split.strategy, chunk_count=len(split.chunks))
     split = replace(
         split,
         requested_strategy=request.split_strategy,
@@ -431,12 +484,27 @@ async def run_transcription_path(
                 "chunk_windows": [(chunk.start, chunk.end) for chunk in split.chunks],
             },
         )
-    effective_before_chunk = before_chunk
-    effective_after_chunk = after_chunk
+    async def guarded_before_chunk(chunk_index: int, total_chunks: int) -> None:
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        emit("chunk.started", chunk_index=chunk_index, total_chunks=total_chunks)
+        if before_chunk is not None:
+            await before_chunk(chunk_index, total_chunks)
+
+    async def guarded_after_chunk(chunk_index: int, total_chunks: int, result: TranscriptionResult) -> None:
+        emit("chunk.completed", chunk_index=chunk_index, total_chunks=total_chunks,
+             duration_ms=result.timings.inference_ms, generated_tokens=result.generation.generated_tokens)
+        if after_chunk is not None:
+            await after_chunk(chunk_index, total_chunks, result)
+
+    effective_before_chunk: BeforeChunkCallback | None = guarded_before_chunk
+    effective_after_chunk: AfterChunkCallback | None = guarded_after_chunk
     if plan.execution_mode == "native_long_form":
         effective_after_chunk = None
 
         async def native_before_chunk(_chunk_index: int, _total_chunks: int) -> None:
+            if cancel_event.is_set():
+                raise asyncio.CancelledError
             if stage_callback is not None:
                 await stage_callback("transcribing", {"percent": 5.0})
 

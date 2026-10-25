@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import wave
 from array import array
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ class QualityChunk:
         return self.end - self.start
 
 
-def plan_quality_chunks(path: Path, target: float = 60.0, padding: float = 0.0) -> tuple[list[QualityChunk], float]:
+def plan_quality_chunks(path: Path, target: float = 60.0, padding: float = 0.0, *, cancel_event: threading.Event | None = None) -> tuple[list[QualityChunk], float]:
     """Use bounded low-energy search without ever removing source samples.
 
     Core intervals tile the source exactly. Optional context is outside these
@@ -41,12 +42,18 @@ def plan_quality_chunks(path: Path, target: float = 60.0, padding: float = 0.0) 
         frame_samples = max(int(rate / 10), 1)
         energies: list[float] = []
         while block := source.readframes(frame_samples):
+            if cancel_event is not None and cancel_event.is_set():
+                from asr_server.audio.splitter import SplitCancelled
+                raise SplitCancelled()
             samples = array("h", block)
             energies.append(sum(abs(value) for value in samples) / max(len(samples), 1))
     # Context must also fit the model's 180-second input limit.
     core_limit = min(target, 180.0 - 2 * padding)
     boundaries = [0.0]
     while duration - boundaries[-1] > core_limit:
+        if cancel_event is not None and cancel_event.is_set():
+            from asr_server.audio.splitter import SplitCancelled
+            raise SplitCancelled()
         start = boundaries[-1]
         desired = start + core_limit
         left = max(start + core_limit / 2, desired - 5)

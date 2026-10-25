@@ -1,13 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Literal
 
 from asr_server.execution import MOSS_EXECUTION_POLICY, QWEN_EXECUTION_POLICY, ModelExecutionPolicy
+from asr_server.audio.assets import AudioSpec
 
 Backend = Literal["auto", "transformers", "vllm"]
 ModelStatus = Literal["unloaded", "loading", "loaded", "unloading_scheduled", "unloading", "error"]
 MOSS_MODEL_ID = "moss-transcribe-diarize-0.9b"
+
+# One identity source for adapters, capability discovery and smoke tools.
+MODEL_SOURCES: dict[str, tuple[str, str]] = {
+    "qwen3-asr-1.7b": ("Qwen/Qwen3-ASR-1.7B-hf", "057a3b044fcd31c433e7971ab40d68d20e7eae6d"),
+    "qwen3-asr-0.6b": ("Qwen/Qwen3-ASR-0.6B-hf", "6aa69c382e2b426eee1f5870d4c95859a74b6445"),
+    MOSS_MODEL_ID: ("OpenMOSS-Team/MOSS-Transcribe-Diarize", "d7231bbae2587a4af278735eb765b318c4f64edd"),
+}
+ALIGNER_SOURCE = ("Qwen/Qwen3-ForcedAligner-0.6B-hf", "c07281df297b9905d24a508279258cccf987a064")
 
 
 QWEN_LANGUAGES = [
@@ -90,6 +99,10 @@ class ModelCapabilities:
     speaker_resolution_modes: list[str] = field(default_factory=lambda: ["off"])
     speaker_resolution_method: str | None = None
     validated_anchor_replay_speakers: int | None = None
+    context_prompt: bool = True
+    batch_mode: str = "serial"
+    native_batch_max_items: int = 1
+    native_batch_max_audio_seconds: float = 300.0
 
     def to_api(self) -> dict[str, object]:
         return {
@@ -111,7 +124,10 @@ class ModelCapabilities:
             "speaker_resolution_modes": self.speaker_resolution_modes,
             "speaker_resolution_method": self.speaker_resolution_method,
             "validated_anchor_replay_speakers": self.validated_anchor_replay_speakers,
-            "context_prompt": True,
+            "context_prompt": self.context_prompt,
+            "batch_mode": self.batch_mode,
+            "native_batch_max_items": self.native_batch_max_items,
+            "native_batch_max_audio_seconds": self.native_batch_max_audio_seconds,
         }
 
 
@@ -123,6 +139,34 @@ class ModelDefinition:
     capabilities: ModelCapabilities
     revision: str
     execution_policy: ModelExecutionPolicy
+    engine_id: str = "qwen"
+    repository: str = ""
+    audio_spec: AudioSpec = field(default_factory=AudioSpec)
+    pipelines: tuple[str, ...] = ("legacy",)
+    pipeline_version: str = "legacy-v1"
+    engine_version: str = "1"
+    default_pipeline: str = "legacy"
+    resource_type: str = "gpu"
+    runtime_profile_id: str = "managed-python"
+
+    def supports_pipeline(self, profile: str) -> bool:
+        return profile in self.pipelines
+
+    def identity(self) -> dict[str, object]:
+        """Frozen execution identity for idempotency and checkpoint owners."""
+        return {
+            "model": self.id, "revision": self.revision, "repository": self.repository,
+            "engine_id": self.engine_id, "pipeline_version": self.pipeline_version,
+            "engine_version": self.engine_version, "default_pipeline": self.default_pipeline,
+            "audio_spec": asdict(self.audio_spec), "runtime_profile_id": self.runtime_profile_id,
+        }
+
+    def discovery(self) -> dict[str, object]:
+        return {"engine_id": self.engine_id, "pipelines": list(self.pipelines),
+                "audio_spec": asdict(self.audio_spec), "runtime_profile_id": self.runtime_profile_id,
+                "revision": self.revision, "pipeline_version": self.pipeline_version,
+                "engine_version": self.engine_version, "default_pipeline": self.default_pipeline,
+                "resource_type": self.resource_type}
 
 
 def default_models(
@@ -131,8 +175,6 @@ def default_models(
     enable_moss: bool = False,
     enable_qwen_alignment: bool = False,
 ) -> dict[str, ModelDefinition]:
-    if default_model_id not in {"qwen3-asr-1.7b", "qwen3-asr-0.6b"}:
-        raise ValueError("ASR_DEFAULT_MODEL must be qwen3-asr-1.7b or qwen3-asr-0.6b")
     qwen_capabilities = ModelCapabilities(
         transcription=True,
         streaming=False,
@@ -148,16 +190,20 @@ def default_models(
             provider="QwenLM",
             default=default_model_id == "qwen3-asr-1.7b",
             capabilities=qwen_capabilities,
-            revision="057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+            revision=MODEL_SOURCES["qwen3-asr-1.7b"][1],
             execution_policy=QWEN_EXECUTION_POLICY,
+            engine_id="qwen", repository=MODEL_SOURCES["qwen3-asr-1.7b"][0],
+            pipelines=("legacy", "quality_v1"), pipeline_version="qwen-v1",
         ),
         "qwen3-asr-0.6b": ModelDefinition(
             id="qwen3-asr-0.6b",
             provider="QwenLM",
             default=default_model_id == "qwen3-asr-0.6b",
             capabilities=qwen_capabilities,
-            revision="6aa69c382e2b426eee1f5870d4c95859a74b6445",
+            revision=MODEL_SOURCES["qwen3-asr-0.6b"][1],
             execution_policy=QWEN_EXECUTION_POLICY,
+            engine_id="qwen", repository=MODEL_SOURCES["qwen3-asr-0.6b"][0],
+            pipelines=("legacy", "quality_v1"), pipeline_version="qwen-v1",
         ),
     }
     if enable_moss:
@@ -184,8 +230,13 @@ def default_models(
                 speaker_resolution_modes=["off", "auto", "required"],
                 speaker_resolution_method="moss_anchor_replay",
                 validated_anchor_replay_speakers=4,
+                native_batch_max_audio_seconds=MOSS_EXECUTION_POLICY.native_hard_seconds,
             ),
-            revision="d7231bbae2587a4af278735eb765b318c4f64edd",
+            revision=MODEL_SOURCES[MOSS_MODEL_ID][1],
             execution_policy=MOSS_EXECUTION_POLICY,
+            engine_id="moss", repository=MODEL_SOURCES[MOSS_MODEL_ID][0],
+            pipelines=("legacy",), pipeline_version="moss-v1",
         )
-    return models
+    if default_model_id not in models:
+        raise ValueError("ASR_DEFAULT_MODEL must name an enabled model")
+    return {model_id: replace(model, default=model_id == default_model_id) for model_id, model in models.items()}

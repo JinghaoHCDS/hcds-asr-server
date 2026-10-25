@@ -1,0 +1,319 @@
+{
+  "schema_version": 1,
+  "utc": "2026-10-24T16:48:18.670470+00:00",
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "python": "3.12.10",
+  "ffmpeg": "ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "scope": "complete FastAPI gateway + initialized SQLite workbench + HTTPX ASGI harness in each independent child",
+  "adapter": "Qwen mock; real parser/upload/probe/decode/VAD/split/FIFO/status/cleanup",
+  "rss_method": "self ru_maxrss and supervisor ps; baseline after startup and health/models warmup",
+  "sampling_interval_ms": 25,
+  "rss_increment_budget_bytes": 268435456,
+  "source_code_sha256": {
+    "asr_server/main.py": "94769f204fbb9ddd2ed18f9ec28dc037f63b32fcd5d9578683b3923322834e76",
+    "asr_server/jobs.py": "a53f9af815c4992eaf7191765e142ff8fbe182495cf35c19e2a9e5f7ea38aef3",
+    "asr_server/scheduler.py": "f2188f5a0b6edec34d48624363d4051fd5712ee016c6a3718f1f173dc5f70bf5",
+    "asr_server/transcription.py": "7468da8944f55a5742874fbfade98454dca7ece09e36d03bb8509c32f4ea1290",
+    "asr_server/admission.py": "0f794261d9a8eabfee7b5d384d57eb80a4ac02fe62e7095a603f81ea769975fb",
+    "asr_server/audio/preprocess.py": "7ba78b2871b5fcbe98a1ca7ec7e078604af5a8978dec784a784940665979ba74",
+    "asr_server/audio/splitter.py": "98583b79961bd1480201b86cc648caaa08a8c479fa06f096c272af04919008c4",
+    "asr_server/audio/workspace.py": "ce125de62ec333a8b91c487aca647864851bb2628eba9b78a4b0b7560046f344",
+    "asr_server/audio/assets.py": "84ddd57027ddce028c9b9381a1b539aa967bc54169326474438640bd02fe6817"
+  },
+  "cases": [
+    {
+      "api_max_upload_bytes": 536870912,
+      "case_seconds": 600,
+      "children_ru_maxrss_bytes": 16007168,
+      "chunks": 6,
+      "coverage_end": 600.0,
+      "coverage_start": 0.0,
+      "create_http_status": 202,
+      "final_http_status": 200,
+      "full_coverage": true,
+      "gateway_baseline_ru_maxrss_bytes": 59031552,
+      "gateway_baseline_sampled_rss_bytes": 58949632,
+      "gateway_before_startup_ru_maxrss_bytes": 57376768,
+      "gateway_peak_before_shutdown_ru_maxrss_bytes": 60588032,
+      "gateway_ru_maxrss_bytes": 60588032,
+      "health_http_status": 200,
+      "job_id": "job_dc33c2b0292244e7920ba306e04973b9",
+      "job_status": "completed",
+      "logical_spool_after_completed": 0,
+      "logical_spool_after_shutdown": 0,
+      "models_http_status": 200,
+      "normalized_events": [
+        {
+          "audio_seconds": 600.0,
+          "duration_ms": 109.00558400317095,
+          "event": "media.normalized",
+          "frames": 9600000,
+          "output_bytes": 19200044,
+          "sample_rate": 16000
+        }
+      ],
+      "observed_job_phases": [
+        "queued",
+        "preprocessing",
+        "merging",
+        "completed"
+      ],
+      "operation_seconds": 0.214251792000141,
+      "parameters": {
+        "backend": "transformers",
+        "language": "auto",
+        "max_chunk_seconds": "120",
+        "model": "qwen3-asr-1.7b",
+        "overlap_seconds": "2",
+        "preserve_segments": "true",
+        "quality_profile": "legacy",
+        "response_format": "verbose_json",
+        "split_strategy": "auto",
+        "timestamps": "none"
+      },
+      "persistent_pending_after_completed": 0,
+      "persistent_pending_after_shutdown": 0,
+      "poll_count": 5,
+      "polling_http_statuses": [
+        200
+      ],
+      "prefetch": false,
+      "result_duration_seconds": 600.0,
+      "source_bytes": 114456,
+      "source_format": "FLAC mono 16000 Hz digital silence",
+      "source_sha256": "7d512f895e5acf78387bd0a8a0b1976034886ab1b2a7a74e6b79405f94c0e254",
+      "split": {
+        "chunk_count": 6,
+        "hard_chunk_seconds": 300.0,
+        "overlap_seconds": 2.0,
+        "requested_strategy": "auto",
+        "soft_chunk_seconds": 120.0,
+        "speech_interval_count": 0,
+        "strategy": "fixed",
+        "vad_backend": null,
+        "warnings": [
+          "silero_streaming_not_validated_fallback_to_energy",
+          "energy_vad_no_speech_fallback"
+        ]
+      },
+      "startup_seconds": 0.03087874999619089,
+      "temporary_files_after_completed": [],
+      "temporary_pending_after_completed": 0,
+      "temporary_pending_after_shutdown": 0,
+      "total_seconds": 0.24606100001255982,
+      "workbench_initialized": true,
+      "generator_seconds": 0.1183667499863077,
+      "supervisor_wall_seconds": 0.5370127920177765,
+      "gateway_sampled_peak_rss_bytes": 60555264,
+      "gateway_peak_rss_bytes": 60588032,
+      "gateway_peak_increment_bytes": 1638400,
+      "gateway_increment_within_256_mib": true,
+      "decoder_sampled_peak_rss_bytes": 15663104,
+      "decoder_sampled_by_pid": {
+        "37078": 15663104
+      },
+      "rss_samples": 10,
+      "decoder_measurement": "ps samples of gateway child FFmpeg only; generator excluded",
+      "case_files_removed": true
+    },
+    {
+      "api_max_upload_bytes": 536870912,
+      "case_seconds": 3600,
+      "children_ru_maxrss_bytes": 16777216,
+      "chunks": 31,
+      "coverage_end": 3600.0,
+      "coverage_start": 0.0,
+      "create_http_status": 202,
+      "final_http_status": 200,
+      "full_coverage": true,
+      "gateway_baseline_ru_maxrss_bytes": 58802176,
+      "gateway_baseline_sampled_rss_bytes": 58720256,
+      "gateway_before_startup_ru_maxrss_bytes": 57098240,
+      "gateway_peak_before_shutdown_ru_maxrss_bytes": 64880640,
+      "gateway_ru_maxrss_bytes": 64880640,
+      "health_http_status": 200,
+      "job_id": "job_7bbd49ee678d4aecb44a9e381f32d466",
+      "job_status": "completed",
+      "logical_spool_after_completed": 0,
+      "logical_spool_after_shutdown": 0,
+      "models_http_status": 200,
+      "normalized_events": [
+        {
+          "audio_seconds": 3600.0,
+          "duration_ms": 576.8679170287214,
+          "event": "media.normalized",
+          "frames": 57600000,
+          "output_bytes": 115200044,
+          "sample_rate": 16000
+        }
+      ],
+      "observed_job_phases": [
+        "queued",
+        "preprocessing",
+        "splitting",
+        "merging",
+        "completed"
+      ],
+      "operation_seconds": 0.9283801249985117,
+      "parameters": {
+        "backend": "transformers",
+        "language": "auto",
+        "max_chunk_seconds": "120",
+        "model": "qwen3-asr-1.7b",
+        "overlap_seconds": "2",
+        "preserve_segments": "true",
+        "quality_profile": "legacy",
+        "response_format": "verbose_json",
+        "split_strategy": "auto",
+        "timestamps": "none"
+      },
+      "persistent_pending_after_completed": 0,
+      "persistent_pending_after_shutdown": 0,
+      "poll_count": 17,
+      "polling_http_statuses": [
+        200
+      ],
+      "prefetch": false,
+      "result_duration_seconds": 3600.0,
+      "source_bytes": 656112,
+      "source_format": "FLAC mono 16000 Hz digital silence",
+      "source_sha256": "5e46c09b38f0b008e0d5538a10adcf2cb1875281df24c83998c139f6ad8aff95",
+      "split": {
+        "chunk_count": 31,
+        "hard_chunk_seconds": 300.0,
+        "overlap_seconds": 2.0,
+        "requested_strategy": "auto",
+        "soft_chunk_seconds": 120.0,
+        "speech_interval_count": 0,
+        "strategy": "fixed",
+        "vad_backend": null,
+        "warnings": [
+          "silero_streaming_not_validated_fallback_to_energy",
+          "energy_vad_no_speech_fallback"
+        ]
+      },
+      "startup_seconds": 0.03141212501213886,
+      "temporary_files_after_completed": [],
+      "temporary_pending_after_completed": 0,
+      "temporary_pending_after_shutdown": 0,
+      "total_seconds": 0.9606967910076492,
+      "workbench_initialized": true,
+      "generator_seconds": 0.4033386250084732,
+      "supervisor_wall_seconds": 1.1973055000125896,
+      "gateway_sampled_peak_rss_bytes": 64847872,
+      "gateway_peak_rss_bytes": 64880640,
+      "gateway_peak_increment_bytes": 6160384,
+      "gateway_increment_within_256_mib": true,
+      "decoder_sampled_peak_rss_bytes": 16678912,
+      "decoder_sampled_by_pid": {
+        "37113": 16678912
+      },
+      "rss_samples": 23,
+      "decoder_measurement": "ps samples of gateway child FFmpeg only; generator excluded",
+      "case_files_removed": true
+    },
+    {
+      "api_max_upload_bytes": 536870912,
+      "case_seconds": 21600,
+      "children_ru_maxrss_bytes": 16695296,
+      "chunks": 184,
+      "coverage_end": 21600.0,
+      "coverage_start": 0.0,
+      "create_http_status": 202,
+      "final_http_status": 200,
+      "full_coverage": true,
+      "gateway_baseline_ru_maxrss_bytes": 58818560,
+      "gateway_baseline_sampled_rss_bytes": 58736640,
+      "gateway_before_startup_ru_maxrss_bytes": 57114624,
+      "gateway_peak_before_shutdown_ru_maxrss_bytes": 77709312,
+      "gateway_ru_maxrss_bytes": 77709312,
+      "health_http_status": 200,
+      "job_id": "job_d10047b289eb44a0a89af3ca09684a14",
+      "job_status": "completed",
+      "logical_spool_after_completed": 0,
+      "logical_spool_after_shutdown": 0,
+      "models_http_status": 200,
+      "normalized_events": [
+        {
+          "audio_seconds": 21600.0,
+          "duration_ms": 2920.8755000145175,
+          "event": "media.normalized",
+          "frames": 345600000,
+          "output_bytes": 691200044,
+          "sample_rate": 16000
+        }
+      ],
+      "observed_job_phases": [
+        "preprocessing",
+        "splitting",
+        "transcribing",
+        "merging",
+        "completed"
+      ],
+      "operation_seconds": 4.874422708991915,
+      "parameters": {
+        "backend": "transformers",
+        "language": "auto",
+        "max_chunk_seconds": "120",
+        "model": "qwen3-asr-1.7b",
+        "overlap_seconds": "2",
+        "preserve_segments": "true",
+        "quality_profile": "legacy",
+        "response_format": "verbose_json",
+        "split_strategy": "auto",
+        "timestamps": "none"
+      },
+      "persistent_pending_after_completed": 0,
+      "persistent_pending_after_shutdown": 0,
+      "poll_count": 87,
+      "polling_http_statuses": [
+        200
+      ],
+      "prefetch": false,
+      "result_duration_seconds": 21600.0,
+      "source_bytes": 4140576,
+      "source_format": "FLAC mono 16000 Hz digital silence",
+      "source_sha256": "bbd15fd759ff3b19707bb9cef4ddb5b97e31a076ddcdaa51f8b7c1f5472e47f8",
+      "split": {
+        "chunk_count": 184,
+        "hard_chunk_seconds": 300.0,
+        "overlap_seconds": 2.0,
+        "requested_strategy": "auto",
+        "soft_chunk_seconds": 120.0,
+        "speech_interval_count": 0,
+        "strategy": "fixed",
+        "vad_backend": null,
+        "warnings": [
+          "silero_streaming_not_validated_fallback_to_energy",
+          "energy_vad_no_speech_fallback"
+        ]
+      },
+      "startup_seconds": 0.03158866599551402,
+      "temporary_files_after_completed": [],
+      "temporary_pending_after_completed": 0,
+      "temporary_pending_after_shutdown": 0,
+      "total_seconds": 4.906931999983499,
+      "workbench_initialized": true,
+      "generator_seconds": 2.259498125000391,
+      "supervisor_wall_seconds": 5.155388832994504,
+      "gateway_sampled_peak_rss_bytes": 77709312,
+      "gateway_peak_rss_bytes": 77709312,
+      "gateway_peak_increment_bytes": 18972672,
+      "gateway_increment_within_256_mib": true,
+      "decoder_sampled_peak_rss_bytes": 16695296,
+      "decoder_sampled_by_pid": {
+        "37146": 16695296
+      },
+      "rss_samples": 102,
+      "decoder_measurement": "ps samples of gateway child FFmpeg only; generator excluded",
+      "case_files_removed": true
+    }
+  ],
+  "not_validated": [
+    "GPU/CUDA",
+    "ASR quality",
+    "model worker memory",
+    "real network latency",
+    "WSL FFmpeg build"
+  ]
+}

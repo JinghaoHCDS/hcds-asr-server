@@ -3,13 +3,18 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.metadata
+import sys
 from pathlib import Path
 from typing import Any
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-DEFAULT_MODEL = "OpenMOSS-Team/MOSS-Transcribe-Diarize"
+from asr_server.registry import MOSS_MODEL_ID, MODEL_SOURCES
+
+
+DEFAULT_MODEL, DEFAULT_REVISION = MODEL_SOURCES[MOSS_MODEL_ID]
 DEFAULT_AUDIO = "test-fixtures/audio/test_short.wav"
-DEFAULT_REVISION = "d7231bbae2587a4af278735eb765b318c4f64edd"
 
 
 def require_cuda_torch() -> Any:

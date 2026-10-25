@@ -17,6 +17,8 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
   const [domain, setDomain] = useState('ai');
   const [hotwords, setHotwords] = useState('');
   const [language, setLanguage] = useState('auto');
+  const [model, setModel] = useState('');
+  const [profile, setProfile] = useState('');
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState('');
@@ -24,6 +26,18 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
   const savedRef = useRef(saved);
   const abort = useRef(false);
   useEffect(() => () => { abort.current = true; }, []);
+
+  const availableModels = caps?.models.filter(candidate => candidate.pipelines?.length > 0) || [];
+  const selectedModel = availableModels.find(candidate => candidate.id === model)
+    || availableModels.find(candidate => candidate.id === caps?.default_model)
+    || availableModels.find(candidate => candidate.default) || availableModels[0];
+  const availableProfiles = (caps?.quality_profiles || []).filter(candidate => selectedModel?.pipelines.includes(candidate.id)
+    && (candidate.id !== 'quality_v1' || selectedModel.capabilities.forced_alignment));
+  const selectedProfile = availableProfiles.find(candidate => candidate.id === profile)?.id
+    || availableProfiles.find(candidate => candidate.id === caps?.default_quality_profile)?.id || availableProfiles[0]?.id;
+  const availableLanguages = selectedModel?.capabilities.languages || ['auto'];
+  const selectedLanguage = availableLanguages.includes(language) ? language : availableLanguages[0] || 'auto';
+  const canAlign = selectedModel?.capabilities.forced_alignment || selectedModel?.capabilities.segment_timestamps;
 
   function persist(next: SavedUpload[]) { savedRef.current = next; setSaved(next); try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Server offset remains authoritative if browser storage is unavailable. */ } }
   function update(key: string, values: Partial<UploadRow>) { setRows(old => old.map(r => r.key === key ? { ...r, ...values } : r)); }
@@ -40,6 +54,7 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
   }
 
   async function transfer(row: UploadRow) {
+    if (!selectedModel || !selectedProfile) throw new Error('当前模型没有可用的转录流程，请检查服务配置');
     if (caps && row.file.size > caps.max_upload_bytes) throw new Error(`文件超过 ${bytes(caps.max_upload_bytes)} 的上传限制`);
     update(row.key, { state: '校验文件', percent: 0, error: undefined });
     const hasher = sha256.create();
@@ -82,7 +97,8 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
     }
     if (abort.current) throw new Error('上传已暂停，重新选择相同文件可继续');
     update(row.key, { state: '提交任务', percent: 100 });
-    const job = await api<Job>(`/uploads/${upload!.id}/complete`, { method: 'POST', body: JSON.stringify({ domain, hotwords, language, idempotency_key: `upload:${record.id}` }) });
+    const job = await api<Job>(`/uploads/${upload!.id}/complete`, { method: 'POST', body: JSON.stringify({ domain, hotwords, language: selectedLanguage,
+      model: selectedModel.id, quality_profile: selectedProfile, idempotency_key: `upload:${record.id}` }) });
     persist(savedRef.current.filter(v => v.id !== record.id));
     update(row.key, { state: '已加入队列', percent: 100, job });
     onSubmitted();
@@ -111,9 +127,13 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
     <section className="panel settings-panel"><div className="panel-heading"><div className="step-number">02</div><div><h2>让转录更懂你的内容</h2><p>选一个领域，需要时再补充本次的专有名词。</p></div></div>
       <div className="domain-options" role="group" aria-label="内容领域">{(caps?.domains || [{ id: 'general', label: '通用内容' }, { id: 'ai', label: 'AI / 技术内容' }]).map(d => <button key={d.id} disabled={busy} className={`domain-option ${domain === d.id ? 'selected' : ''}`} onClick={() => setDomain(d.id)}><span className="radio-dot" /><strong>{d.label}</strong>{domain === d.id && <Icon name="check" size={16} />}</button>)}</div>
       <label className="field-label">本次热词 <span className="optional">选填</span><textarea value={hotwords} disabled={busy} onChange={e => setHotwords(e.target.value)} rows={3} placeholder="例如：Qwen3-ASR, 混吃等鼠, Agent 工作流" /><small>填写人名、产品名或专业术语，用英文逗号分隔。词汇只作为识别参考。</small></label>
-      <details className="advanced"><summary>更多设置</summary><label className="field-label">音频语言<select value={language} disabled={busy} onChange={e => setLanguage(e.target.value)}><option value="auto">自动识别（推荐中英混说）</option><option value="zh">中文</option><option value="en">英文</option></select></label></details>
-      <div className="submit-row"><span><Icon name="check" size={16} />自动转录与字幕对齐</span>{busy ? <button className="button secondary" onClick={() => { abort.current = true; }}>暂停上传</button> : <button className="button primary" disabled={!count || !caps} onClick={() => void start()}>开始转录{count > 0 && ` · ${count} 个文件`}<Icon name="arrow" size={18} /></button>}</div>
-      {caps?.quality_profiles.some(p => p.id === 'quality_v1' && p.validated === false) && <p className="footnote">当前转录流程处于试运行阶段，正在进行真实长音频验收。可通过结果页回听、校对后交付。</p>}
+      <details className="advanced"><summary>更多设置</summary>
+        <label className="field-label">转录模型<select value={selectedModel?.id || ''} disabled={busy} onChange={e => { setModel(e.target.value); setProfile(''); }}>{availableModels.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.id}</option>)}</select></label>
+        <label className="field-label">转录流程<select value={selectedProfile || ''} disabled={busy} onChange={e => setProfile(e.target.value)}>{availableProfiles.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}</select></label>
+        <label className="field-label">音频语言<select value={selectedLanguage} disabled={busy} onChange={e => setLanguage(e.target.value)}>{availableLanguages.map(code => <option key={code} value={code}>{({ auto: '自动识别', zh: '中文', en: '英文' } as Record<string, string>)[code] || code}</option>)}</select></label>
+      </details>
+      <div className="submit-row"><span><Icon name="check" size={16} />{canAlign ? '自动转录与字幕对齐' : '自动转录'}</span>{busy ? <button className="button secondary" onClick={() => { abort.current = true; }}>暂停上传</button> : <button className="button primary" disabled={!count || !caps || !selectedModel || !selectedProfile} onClick={() => void start()}>开始转录{count > 0 && ` · ${count} 个文件`}<Icon name="arrow" size={18} /></button>}</div>
+      {selectedProfile === 'quality_v1' && caps?.quality_profiles.some(p => p.id === 'quality_v1' && p.validated === false) && <p className="footnote">当前转录流程处于试运行阶段，正在进行真实长音频验收。可通过结果页回听、校对后交付。</p>}
       {rows.some(v => v.job) && <button className="text-link uploaded-link" onClick={onOpenJobs}>前往我的任务，查看处理进度 <Icon name="arrow" size={15} /></button>}
     </section>
   </div><aside className="upload-aside"><div className="guide-card"><div className="eyebrow">A QUIETER WORKFLOW</div><h3>从声音到成稿，<br />少一点来回。</h3><div className="guide-step"><b>1</b><div><strong>上传后，即可离开</strong><p>文件上传完成后，任务会在服务器继续处理。</p></div></div><div className="guide-step"><b>2</b><div><strong>完整转录，局部复核</strong><p>系统自动处理长音频，并检查需要复核的片段。</p></div></div><div className="guide-step"><b>3</b><div><strong>回听校对，导出交付</strong><p>点击文字回到原音，保留修改记录和字幕版本。</p></div></div><div className="retention-note"><Icon name="headphones" size={18} /><span>任务完成后保留 {caps?.retention_days ?? 7} 天<br /><small>可随时手动删除</small></span></div></div>{caps?.storage && <StorageMeter used={caps.storage.used_bytes} quota={caps.storage.quota_bytes} />}</aside></div>;

@@ -51,7 +51,7 @@ Options:
   --deploy-dir DIR              Copy/deploy into DIR. Default: current checkout
   --host HOST                   Service host. Default: 0.0.0.0
   --port PORT                   Service port. Only 18080 is supported
-  --adapter NAME                ASR adapter for the service. Default: qwen
+  --adapter NAME                qwen (legacy alias), registered, or mock. Default: qwen
   --idle-unload-seconds SECONDS Unload an idle loaded model after this many seconds. Default: 180
   --mock                        Deploy mock adapter and skip GPU/Qwen checks
   --skip-sync                   Do not sync source tree to deployment directory
@@ -189,7 +189,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "${PORT}" == "18080" ]] || die "the only supported LAN API port is 18080"
-[[ "${ADAPTER}" == "qwen" || "${ADAPTER}" == "mock" ]] || die "adapter must be qwen or mock"
+[[ "${ADAPTER}" == "qwen" || "${ADAPTER}" == "registered" || "${ADAPTER}" == "mock" ]] || die "adapter must be qwen, registered, or mock"
 [[ "${HOST}" == "0.0.0.0" || "${HOST}" == "127.0.0.1" ]] || die "host must be 0.0.0.0 (LAN) or 127.0.0.1 (local only)"
 [[ "${IDLE_UNLOAD_SECONDS}" =~ ^[0-9]+$ ]] || die "idle-unload-seconds must be a non-negative integer"
 [[ "${QWEN_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]] || die "ASR_QWEN_BATCH_SIZE must be a positive integer"
@@ -197,7 +197,7 @@ done
 [[ "${TRANSFORMERS_OFFLINE}" == "0" || "${TRANSFORMERS_OFFLINE}" == "1" ]] || die "ASR_TRANSFORMERS_OFFLINE must be 0 or 1"
 
 # Fail before installing or syncing anything on a client machine.
-if [[ "${ADAPTER}" == "qwen" || "${INSTALL_GPU_DEPS}" == "1" || "${INSTALL_SILERO}" == "1" || "${INSTALL_QUALITY_VAD}" == "1" ]]; then
+if [[ "${ADAPTER}" != "mock" || "${INSTALL_GPU_DEPS}" == "1" || "${INSTALL_SILERO}" == "1" || "${INSTALL_QUALITY_VAD}" == "1" ]]; then
   [[ "$(uname -s)" == "Linux" ]] || die "real inference deployment requires Windows WSL2; use --mock for CPU development"
   kernel_release="$(uname -r)"
   case "${kernel_release}" in

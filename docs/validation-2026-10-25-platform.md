@@ -1,0 +1,56 @@
+# 2026-10-25 平台改进验收
+
+本轮按[改进计划](asr-platform-improvement-plan.md)实现 A–E，并完成本地工程检查和用户授权的 WSL 独立 GPU 验收。源码基线为 `2fb6a4dca0375ad2cbc3a20b2e3aa5b4b71cf852`。当前结果是未提交的工作区；线上服务未切换。运行行为见[平台契约](asr-platform-runtime.md)，真实模型结果见 [WSL 验收记录](validation-2026-10-25-wsl-platform.md)。
+
+## 达成的行为和性能
+
+- 请求到 FIFO、分块及 worker RPC 有独立 request/trace/job/RPC ID；有限 JSONL、错误栈、诊断包不复制正文、音频或凭据。
+- 上传在解析前准入；multipart spools 与应用副本纳入资源管理。临时与持久区尚未落盘承诺按文件系统合计，PCM 原子 handoff 及增量物化避免重复扣费。PCM 解码按实际字节截止，窗口有总数及取消边界；工作台 quality 与 legacy 借用同一规范化资产，正常重试复用。
+- 短同步、旧异步、工作台、编辑对齐及 load 共用 FIFO；取消不会停止后续任务。实际四入口事件同步场景确认异步 → 同步 HTTP → 工作台 → 编辑对齐，最大活跃调用为 1。深度 1 预取可用，默认关闭；准备取消清理结束前不启动第二个 decoder。
+- SQLite schema 3 将状态摘要、版本正文和完成块分开，查询使用索引及分页；数据库和密码操作在有界线程执行器中完成。前端终态停止定时读取正文，管理员摘要只含白名单字段。
+- 注册表集中模型来源、revision、输入规格、pipeline 和引擎工厂。第三基础引擎通过真实 API/工作台集成测试，能力不足提前拒绝；测试 stub 未加入生产模型列表。
+
+Mac 同机 CPU 对照使用同一 Python 3.12、显式基线源码树、相同 fixture、暖机及至少三次测量。详见[方法和原始结果](validation-artifacts/2026-10-25-platform/benchmark-summary.md)。这些指标属于本地控制面，未测 LAN/GPU 吞吐。共享物理预算及 decoder 槽位收尾后，已重新执行三轮当前版延迟与五项资源探针；下表使用最终采样。
+
+| 实测项目 | 基线 | 本轮 | 解释 |
+| --- | --- | --- | --- |
+| 100/1000/10000 条任务查询中位数 | 2.503 / 18.637 / 182.089 ms | 1.090 / 1.067 / 1.081 ms | 旧调用全量读取并投影，新调用只取 50 条摘要；返回协议不同，不能按相同结果集宣称倍数提速 |
+| 10 客户端、2 上传、1 mock 推理的列表 p95，三轮 | 194.28 / 189.42 / 189.90 ms | 35.78 / 32.39 / 35.29 ms | ASGITransport 暖机负载；每客户端按 3.5 秒周期查询，非真实网络/模型 |
+| 同负载 health p95，三轮 | 见原始 JSON | 2.09 / 2.15 / 2.11 ms | 读取缓存 GPU 状态；本地 mock 不执行 CUDA |
+| event loop 最大延迟，三轮范围 | 179.60–192.79 ms | 3.00–9.64 ms | p95 约 2 ms，最大尖峰也单独保留 |
+| 30/180 秒 PCM 规范化 | 同源固定 fixture | PCM SHA256 一致 | 容器头发生变化，保留所有耗时样本及离群值，不能据此声称识别质量提高 |
+
+六小时只做资源验收，使用稀疏 WAV 原音及真实 FFmpeg 解码，不调用 ASR：输出精确为 `691200044` 字节，184 个路径描述符完整覆盖；helper 控制进程 RSS 峰值增量约 0.969 MiB，独立采样 FFmpeg 峰值约 15.81 MiB。10 分钟/1 小时/6 小时耗时分别约 0.123/0.378/2.322 秒。6 小时加一个采样被拒绝，partial 未超预算；取消后进程、partial 和配额均已回收。这些是音频 helper 进程指标，另行完成的完整网关测量见下段。[资源原始记录](validation-artifacts/2026-10-25-platform/resource-probe.json)
+
+完整网关补验采用独立进程、真实 FastAPI lifespan（包括工作台 SQLite 初始化）、HTTPX ASGI multipart 上传、FIFO、FFmpeg、默认 auto VAD 与 Qwen mock，三组 job 均由 202 到 completed。10 分钟/1 小时/6 小时 RSS 增量分别为 **1.563 / 5.875 / 18.094 MiB**，低于 256 MiB 起始预算；六小时独立 decoder 采样峰值约 15.922 MiB。压缩 FLAC 源分别为 114456/656112/4140576 字节，全部低于原上传限额；6/31/184 块完整覆盖原时长，每项归一化恰一次。完成和关停后临时、持久预留均归零，合成素材及数据库已删除。CPU+mock 的 0.214/0.928/4.874 秒墙钟不代表真实 ASR 吞吐或质量。[完整网关原始记录](validation-artifacts/2026-10-25-platform/gateway-memory.json)
+
+日志纯生产者压力测试中，1 万事件约增加 6.39 微秒/事件；INFO 中位数 64.67 ms，disabled 0.77 ms，相对增量 8287.8%，饱和时约丢弃 6023–6024 条。它测量热循环，不能作为整段转录开销比例。丢失计数实际可见，业务不会等待日志队列。[日志原始记录](validation-artifacts/2026-10-25-platform/current-final-logs.json)。完整 GPU 工作负载另测 INFO/CRITICAL，各三轮的结果和统计限制见 WSL 记录，不能凭小样本保证所有负载均低于 3%。
+
+## 测试精简与本地验收
+
+基线：329 passed、4 skipped，16.09 秒。第一轮集成：370 passed、4 skipped，18.67 秒；资源边界和独立对齐 smoke 修复后的完整回归为 **380 passed、4 skipped，20.11 秒**，总计 384 项；mypy 检查 **115 个文件**通过，前端 TypeScript/Vite 构建及发布依赖检查通过。新增覆盖解析截止、解码预算、共享 FIFO、业务取消、预取清理、日志隐私/整链关联、schema 迁移、正文分离和第三引擎。执行数量增加来自新的行为边界，不将参数化或迁出默认 CI 当作提速。
+
+[测试去向表](asr-platform-test-map.md)逐项记录了文案快照、重复 422、孤立模型常量和卸载调用顺序断言的删除/合并，以及依赖检查迁入每次 CI 仍执行的发布命令。原权限隔离、质量真实性、生命周期、取消、删除和恢复保护继续运行。默认本地行为套件仍完整执行；GPU/performance/release 有显式命令和 marker。默认四项跳过是两项未配置真实服务地址的 HTTP smoke，以及两项缺少可选 Jinja2 的语言模板用例；另用 `uv run --with 'jinja2>=3.1.6,<4' python -m pytest -q tests/test_qwen_adapter.py` 独立执行，23 项通过，覆盖两项显式语言模板回归，未安装 GPU 包。
+
+浏览器通过 Ego Lite 实际操作：登录、模型选择、上传、摘要列表、结果页、修改文字建立 v2、下载 v2 SRT。终态停留期间详情只读取一次，编辑后主动刷新。重启并由 schema 2 迁入 3 后，原 v2 可继续读取；ETag 未变化返回 `304`，音频 Range 返回 `206`。浏览器使用 mock adapter，文字及字幕不作为真实 ASR 精度证据。窗口最小化/目标截图能力使本轮没有截图，DOM 和请求/下载已验证。[浏览器记录](validation-artifacts/2026-10-25-platform/browser.json)
+
+实际运行了诊断 trace 和 bundle；示例包仅含 `trace.json`、`task-summary.json`、`runtime-versions.json`、`checkpoints.json`、`manifest.json`，无音频、SQLite 全库或正文。命令与限额见[诊断文档](asr-diagnostics.md)。
+
+## 迁移、恢复与回滚
+
+在停止本次本地服务写入后，用原发布工具备份和恢复 schema 2 测试数据，再迁入 schema 3：一项任务、两个版本及版本内容 SHA256 均保持一致，SQLite integrity_check 为 ok，迁移约 2.23 ms；服务重启后仍可回听和导出。[迁移证据](validation-artifacts/2026-10-25-platform/migration.json)
+
+迁移前临时备份的源码摘要在持续开发中已变化，因此该次恢复明确报告 `source_matches=false`；数据完整性通过，未把它冒充完整匹配的生产回滚。实际发布必须停止写入，保存匹配的源码、前端和数据库备份，并在回滚时整体恢复。旧代码不得直接打开 schema 3 数据。本轮未部署或执行生产回滚。最终源码/前端包与 schema 3 备份另以相同 source_digest 配对，在独立目录完成恢复和 integrity_check；本地发布演练的清单保存在 Git 忽略目录 `data/platform-validation-20261025/release-manifest.json`，其中包含包的 SHA256 和恢复 source_matches 结果。
+
+## 根因映射与尚未验证的事项
+
+| 原报告线索 | 本轮改动与本地观察 | 剩余验证 |
+| --- | --- | --- |
+| 窗口生成不前进/数量无界 | 整数采样、追加前总数上限及循环取消；近等 overlap/跨 VAD 上限用有界 fixture 验证 | 真实长素材识别质量 |
+| 解析副本/上传接收资源缺口 | ASGI 截止、受控 spools、接收槽及共享资源 lease；断连/取消回收 | 目标部署文件系统和真实并发负载 |
+| 完整解码后才限体积 | PCM 落盘前硬预算、有限 stderr、deadline/取消回收，六小时边界和一采样越界实际验证；WSL 十分钟真实模型流程通过 | 六小时真实语音质量及目标负载持续运行 |
+| decoder 二级资源访问的可接受性 | probe/decode 同策略；Mac FFmpeg 8.1.1 和 WSL n8.1.2 十种普通容器兼容，concat/HLS dummy 被拒绝；MOV drefs 开关默认关闭 | 未发现可接受外部引用的复现，保持线索证据状态，不宣称修复已确认 SSRF |
+
+Windows node 的 `LittleBoatTan_20261023_2000` 目录实际观察到 88 个 MP4。使用 Windows FFmpeg 8.0.1 从三个不同节目提取开发 30 秒、验收 180 秒和 600 秒片段，转移后 SHA256 一致；音频留在本次验收数据目录，不进入 Git 或源码包。[素材来源与摘要](validation-artifacts/2026-10-25-platform/samples.json)
+
+用户明确授权“本任务在 WSL 独立验收”后，复用已安装环境离线验证了 Qwen 0.6B/1.7B、官方 ForcedAligner、MOSS、自动模型切换、卸载、在途检查点恢复及显存回收，详见 WSL 记录。MOSS 180 秒样本使用原默认 2160 token 时触顶并返回 `generation_truncated`，显式 8192 后通过；本轮未改变 MOSS 预算策略。没有人工参考稿，不能发布准确率或六小时识别质量结论。

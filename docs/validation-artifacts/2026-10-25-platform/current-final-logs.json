@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "source_label": "asr_Server",
+  "python": "3.12.10",
+  "machine": {
+    "os": "Darwin",
+    "release": "27.0.0",
+    "architecture": "arm64",
+    "cpu_count": 10
+  },
+  "repeats": 3,
+  "scope": "synthetic CPU/I/O only; no GPU, no quality measurement",
+  "query_semantics": "baseline returns all rows; current returns one summary page of 50; these are different protocols",
+  "logs": {
+    "available": true,
+    "event_count": 10000,
+    "queue_capacity": 4096,
+    "workload": "event-only saturated producer microbenchmark; not transcription wall-clock overhead",
+    "modes": {
+      "CRITICAL": {
+        "samples_ms": [
+          0.7520409999415278,
+          0.7710419886279851,
+          0.7778330182190984
+        ],
+        "median_ms": 0.7710419886279851,
+        "min_ms": 0.7520409999415278,
+        "max_ms": 0.7778330182190984,
+        "emit_and_flush_ms": [
+          0.7842500053811818,
+          0.7998329820111394,
+          0.7992920000106096
+        ],
+        "dropped_count": [
+          0,
+          0,
+          0
+        ]
+      },
+      "INFO": {
+        "samples_ms": [
+          65.5315000039991,
+          64.65683301212266,
+          64.67325001722202
+        ],
+        "median_ms": 64.67325001722202,
+        "min_ms": 64.65683301212266,
+        "max_ms": 65.5315000039991,
+        "emit_and_flush_ms": [
+          101.84683400439098,
+          99.15787499630824,
+          98.99179101921618
+        ],
+        "dropped_count": [
+          6024,
+          6023,
+          6024
+        ]
+      }
+    },
+    "producer_overhead_percent": 8287.772776461046,
+    "extra_microseconds_per_event": 6.390220802859403
+  }
+}

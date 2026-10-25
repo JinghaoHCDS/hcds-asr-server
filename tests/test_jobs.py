@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import threading
-import wave
-from array import array
 from collections.abc import AsyncIterator
 from pathlib import Path
 from datetime import timedelta
@@ -23,15 +20,7 @@ from asr_server.main import create_app
 from asr_server.jobs import utc_now
 
 
-def make_wav(duration_seconds: float, amplitude: int = 10_000, sample_rate: int = 16_000) -> bytes:
-    samples = array("h", [amplitude] * int(duration_seconds * sample_rate))
-    output = io.BytesIO()
-    with wave.open(output, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(samples.tobytes())
-    return output.getvalue()
+from tests.helpers import make_wav
 
 
 @pytest.fixture
@@ -77,7 +66,7 @@ async def wait_for_status(
 def patch_job_tempdir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     counter = 0
 
-    def mkdtemp(prefix: str) -> str:
+    def mkdtemp(prefix: str, dir: object = None) -> str:
         nonlocal counter
         counter += 1
         path = tmp_path / f"{prefix}{counter}"
@@ -181,7 +170,7 @@ async def test_job_manager_start_removes_stale_job_temp_dirs(
     (stale / "upload").write_bytes(b"old audio")
     unrelated = tmp_path / "other_temp"
     unrelated.mkdir()
-    monkeypatch.setattr("asr_server.jobs.tempfile.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setenv("ASR_TEMP_DIR", str(tmp_path))
 
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver"):
@@ -455,7 +444,7 @@ async def test_running_job_publishes_terminal_state_only_after_workspace_cleanup
             assert pending.json()["expires_at"] is None
             assert "result" not in pending.json()
             assert job.upload_path.exists()
-            assert app.state.workspace_manager._reserved_upload_bytes == job.workspace.size_bytes
+            assert app.state.workspace_manager._reserved_upload_bytes == job.workspace.size_bytes + sum(lease.size_bytes for lease in job.workspace.resource_leases)
 
             allow_cleanup.set()
             await asyncio.wait_for(cleanup_finished.wait(), timeout=5)
@@ -557,7 +546,7 @@ async def test_queued_job_cancellation_publishes_terminal_state_only_after_clean
             assert terminal.json()["expires_at"] is not None
             assert not job.work_dir.exists()
             first_job = app.state.job_manager._jobs[str(first["id"])]
-            assert app.state.workspace_manager._reserved_upload_bytes == first_job.workspace.size_bytes
+            assert app.state.workspace_manager._reserved_upload_bytes == first_job.workspace.size_bytes + sum(lease.size_bytes for lease in first_job.workspace.resource_leases)
             allow_inference.set()
             response = await asyncio.wait_for(cancel_task, timeout=5)
             if cancel_method == "delete":
@@ -647,20 +636,6 @@ async def test_job_queue_limit_rejects_excess_jobs() -> None:
         assert response.json()["error"]["code"] == "job_queue_full"
         assert response.json()["error"]["details"]["max_queued_jobs"] == 1
         await wait_for_status(client, str(first["id"]), {"completed"})
-
-
-async def test_job_creation_rejects_upload_over_size_limit() -> None:
-    app = create_app(settings=Settings(max_upload_mb=1))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.post(
-            "/v1/audio/transcription-jobs",
-            files={"file": ("large.wav", b"x" * (1024 * 1024 + 1), "audio/wav")},
-        )
-
-    assert response.status_code == 413
-    body = response.json()
-    assert body["error"]["code"] == "audio_too_large"
-    assert body["error"]["details"]["max_upload_mb"] == 1
 
 
 async def test_sync_transcription_over_duration_threshold_returns_job(

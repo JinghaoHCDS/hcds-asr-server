@@ -19,9 +19,13 @@ from uuid import uuid4
 from asr_server.adapters.base import TranscriptionResult
 from asr_server.config import Settings
 from asr_server.errors import AsrError
-from asr_server.audio.workspace import AudioWorkspace
+from asr_server.audio.workspace import AudioWorkspace, ResourceLease, remaining_workspace_output_bytes
+from asr_server.audio.assets import NormalizedAudioAsset
+from asr_server.audio.preprocess import normalize_audio_path_to_wav_async
 from asr_server.lifecycle import ModelLifecycleManager
 from asr_server.registry import Backend
+from asr_server.scheduler import OperationScheduler
+from asr_server.observability import ExecutionContext, current_context, bind_context, emit, safe_exception
 from asr_server.transcription import (
     TranscriptionRequest,
     ValidatedTranscription,
@@ -140,6 +144,10 @@ class TranscriptionJob:
     partial_texts: list[str] = field(default_factory=list)
     idempotency_key: str | None = None
     request_fingerprint: str | None = None
+    execution_context: ExecutionContext = field(default_factory=ExecutionContext.new)
+    normalized_asset: NormalizedAudioAsset | None = None
+    preparation_lease: ResourceLease | None = None
+    preparation_error: BaseException | None = None
 
 
 class JobManager:
@@ -148,7 +156,8 @@ class JobManager:
         self._settings = settings
         self._jobs: dict[str, TranscriptionJob] = {}
         self._idempotency: dict[str, str] = {}
-        self._queue: deque[str] = deque()
+        self.scheduler = OperationScheduler(settings.max_queued_jobs, prefetch=settings.preprocessing_prefetch)
+        self._queue = self.scheduler.queue
         self._external: dict[str, Callable[[], Awaitable[None]]] = {}
         self._running_external: str | None = None
         self._condition = asyncio.Condition()
@@ -161,42 +170,25 @@ class JobManager:
         if not self._stale_temp_dirs_cleaned:
             await asyncio.to_thread(self._cleanup_stale_temp_dirs)
             self._stale_temp_dirs_cleaned = True
-        if self._worker is None or self._worker.done():
-            self._closed = False
-            self._worker = asyncio.create_task(self._worker_loop())
+        await self.scheduler.start()
+        self._closed = False
+        self._worker = self.scheduler.worker
         if self._sweeper is None or self._sweeper.done():
             self._sweeper = asyncio.create_task(self._expiry_loop())
 
     async def shutdown(self) -> None:
         self._closed = True
-        async with self._condition:
-            queued_ids = list(self._queue)
-            self._queue.clear()
-            for job_id in queued_ids:
-                job = self._jobs.get(job_id)
-                if job is not None:
-                    job.status = "cancel_requested"
-            for job in self._jobs.values():
-                if job.id not in queued_ids and job.status not in TERMINAL_STATUSES:
-                    job.status = "cancel_requested"
-            self._condition.notify_all()
+        queued_ids = list(self._queue)
+        for job in self._jobs.values():
+            if job.status not in TERMINAL_STATUSES:
+                job.status = "cancel_requested"
+                job.execution_context.cancel_event.set()
+        await self.scheduler.shutdown(self._settings.job_shutdown_grace_seconds, self._manager.abort_all_workers)
+        self._worker = None
         for job_id in queued_ids:
-            job = self._jobs.get(job_id)
-            if job is not None:
-                await self._cleanup_cancelled_job(job)
-        if self._worker is not None:
-            done, _pending = await asyncio.wait(
-                {self._worker},
-                timeout=self._settings.job_shutdown_grace_seconds,
-            )
-            if not done:
-                await self._manager.abort_all_workers()
-                self._worker.cancel()
-                try:
-                    await self._worker
-                except asyncio.CancelledError:
-                    pass
-            self._worker = None
+            queued_job = self._jobs.get(job_id)
+            if queued_job is not None:
+                await self._cleanup_cancelled_job(queued_job)
         if self._sweeper is not None:
             self._sweeper.cancel()
             try:
@@ -208,36 +200,33 @@ class JobManager:
             await self._cleanup_job_files(job)
         self._external.clear()
 
-    async def enqueue_external(self, key: str, operation: Callable[[], Awaitable[None]]) -> None:
-        """Share the legacy FIFO worker with durable workbench operations.
-
-        The durable owner persists state and cancellation. This manager only
-        schedules its operation; external records are never visible via /v1/jobs.
-        """
+    async def enqueue_external(self, key: str, operation: Callable[[], Awaitable[None]],
+                               *, context: ExecutionContext | None = None,
+                               prepare: Callable[[], Awaitable[None]] | None = None,
+                               dispose: Callable[[], Awaitable[None]] | None = None) -> None:
         await self.start()
-        async with self._condition:
-            if key in self._jobs:
-                raise AsrError(409, "job_id_conflict", "job identifier already exists")
-            if key in self._external:
-                return
-            if self._active_job_count() >= self._settings.max_queued_jobs:
-                raise AsrError(429, "job_queue_full", "too many queued or running transcription jobs")
-            self._external[key] = operation
-            self._queue.append(key)
-            self._condition.notify()
+        if key in self._jobs:
+            raise AsrError(409, "job_id_conflict", "job identifier already exists")
+        if key in self._external:
+            return
+        async def owned() -> None:
+            self._running_external = key
+            try:
+                await operation()
+            finally:
+                self._external.pop(key, None)
+                self._running_external = None
+        await self.scheduler.submit(key, owned, kind="workbench", context=context, prepare=prepare, dispose=dispose)
+        self._external[key] = operation
 
     def external_queue_position(self, key: str) -> int:
         return self._queue_position(key)
 
     async def cancel_external(self, key: str) -> bool:
-        """Remove a waiting operation; never interrupt an active GPU call."""
-        async with self._condition:
-            if key not in self._queue or key not in self._external:
-                return False
-            self._queue.remove(key)
+        removed = await self.scheduler.cancel(key)
+        if removed:
             self._external.pop(key, None)
-            self._condition.notify_all()
-            return True
+        return removed
 
     async def create_job(
         self,
@@ -314,11 +303,20 @@ class JobManager:
                 workspace=workspace,
                 idempotency_key=request.idempotency_key,
                 request_fingerprint=request_fingerprint,
+                execution_context=current_context().with_fields(job_id=job_id, model_id=validated.selected_model, pipeline_id=request.quality_profile),
             )
             self._jobs[job_id] = job
             if request.idempotency_key:
                 self._idempotency[request.idempotency_key] = job_id
-            self._queue.append(job_id)
+            try:
+                await self.scheduler.submit(job_id, lambda: self._run_job(job), context=job.execution_context,
+                    prepare=(lambda: self._prepare_job(job)) if self._settings.preprocessing_prefetch else None,
+                    dispose=lambda: self._cleanup_cancelled_job(job))
+            except BaseException:
+                self._jobs.pop(job_id, None)
+                if request.idempotency_key:
+                    self._idempotency.pop(request.idempotency_key, None)
+                raise
             self._condition.notify()
             return self._job_create_payload(job)
 
@@ -333,17 +331,16 @@ class JobManager:
         self._expire_jobs()
         job = self._job_or_404(job_id)
         async with self._condition:
-            if job.status == "queued":
-                try:
-                    self._queue.remove(job_id)
-                except ValueError:
-                    pass
+            if job.status == "queued" or self.scheduler.position(job_id) > 0:
+                job.execution_context.cancel_event.set()
+                await self.scheduler.cancel(job_id)
                 await self._cleanup_cancelled_job(job)
                 self._condition.notify()
                 return {"id": job.id, "status": job.status, "message": "job cancelled"}
             if job.status in TERMINAL_STATUSES:
                 return {"id": job.id, "status": job.status, "message": f"job is already {job.status}"}
             job.status = "cancel_requested"
+            job.execution_context.cancel_event.set()
             native_long_form = isinstance(job.split, dict) and job.split.get("execution_mode") == "native_long_form"
             message = (
                 "cancellation will take effect after the current model invocation finishes"
@@ -363,31 +360,34 @@ class JobManager:
         except KeyError as exc:
             raise AsrError(404, "job_not_found", f"unknown job: {job_id}") from exc
 
-    async def _worker_loop(self) -> None:
-        while True:
-            async with self._condition:
-                await self._condition.wait_for(lambda: self._closed or bool(self._queue))
-                if self._closed and not self._queue:
+    async def _prepare_job(self, job: TranscriptionJob) -> None:
+        # Prefetch owns a full output reservation before starting the decoder.
+        # Failure to obtain spare capacity defers decoding to ordinary execution.
+        try:
+            if job.workspace is None or job.execution_context.cancel_event.is_set():
+                return
+            spec = self._manager.runtime_for(job.model).definition.audio_spec
+            budget = min(await asyncio.to_thread(remaining_workspace_output_bytes, job.work_dir, self._settings),
+                         int(21600 * spec.bytes_per_second) + 44)
+            try:
+                lease = await job.workspace._manager.reserve_resource(budget, job.work_dir)
+            except AsrError as exc:
+                if exc.code in {"storage_unavailable", "job_queue_full"}:
                     return
-                job_id = self._queue.popleft()
-                external = self._external.get(job_id)
-                if external is not None:
-                    self._running_external = job_id
-            if external is not None:
-                try:
-                    await external()
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception("workbench operation failed id=%s", job_id)
-                finally:
-                    self._external.pop(job_id, None)
-                    self._running_external = None
-            else:
-                await self._run_job(self._jobs[job_id])
+                raise
+            job.preparation_lease = lease
+            normalized = await normalize_audio_path_to_wav_async(
+                job.upload_path, job.work_dir / "normalized.wav", spec=spec,
+                max_output_bytes=budget, cancel_event=job.execution_context.cancel_event, resource_lease=lease,
+                timeout_seconds=self._settings.ffmpeg_timeout_seconds,
+            )
+            job.normalized_asset = normalized.asset
+            await lease.release_unused()
+        except BaseException as exc:
+            job.preparation_error = exc
 
     async def _run_job(self, job: TranscriptionJob) -> None:
-        logger.info("starting transcription job id=%s model=%s", job.id, job.model)
+        emit("job.processing", model_id=job.model)
         job.started_at = utc_now()
         job.status = "preprocessing"
         job.progress = JobProgress(phase="preprocessing", percent=1.0, message="preprocessing uploaded audio")
@@ -396,6 +396,8 @@ class JobManager:
         error: dict[str, object] | None = None
         worker_cancelled = False
         try:
+            if job.preparation_error is not None:
+                raise job.preparation_error
             async def stage_callback(phase: str, update: dict[str, object]) -> None:
                 self._raise_if_cancel_requested(job)
                 self._update_phase(job, phase, update)
@@ -448,6 +450,8 @@ class JobManager:
                 stage_callback=stage_callback,
                 before_chunk=before_chunk,
                 after_chunk=after_chunk,
+                normalized_asset=job.normalized_asset,
+                cancel_event=job.execution_context.cancel_event, owner_workspace=job.workspace,
             )
             self._raise_if_cancel_requested(job)
             final_status = "completed"
@@ -455,11 +459,13 @@ class JobManager:
             final_status = "cancelled"
         except asyncio.CancelledError:
             job.status = "cancel_requested"
-            worker_cancelled = True
+            task = asyncio.current_task()
+            worker_cancelled = bool(task and task.cancelling())
         except AsrError as exc:
             final_status = "failed"
             error = {"code": exc.code, "message": exc.message, "details": exc.details}
         except Exception as exc:
+            emit("job.failed", diagnostics=safe_exception(exc), error_code="inference_failed")
             final_status = "failed"
             error = {
                 "code": "inference_failed",
@@ -494,7 +500,7 @@ class JobManager:
                 total_chunks=split_count,
                 completed_chunks=split_count,
             )
-        logger.info("finished transcription job id=%s status=%s", job.id, job.status)
+        emit("job." + job.status, error_code=job.error.get("code") if job.error else None)
         if worker_cancelled:
             raise asyncio.CancelledError
 
@@ -607,7 +613,7 @@ class JobManager:
         return 0
 
     def _active_job_count(self) -> int:
-        return sum(1 for job in self._jobs.values() if job.status not in TERMINAL_STATUSES) + len(self._external)
+        return len(self.scheduler.operations)
 
     def _elapsed_seconds(self, job: TranscriptionJob) -> float:
         end = job.completed_at or utc_now()
@@ -626,20 +632,26 @@ class JobManager:
                 del self._jobs[job_id]
 
     async def _cleanup_job_files(self, job: TranscriptionJob) -> None:
-        if job.workspace is not None:
-            await job.workspace.cleanup()
-            return
-        for path in sorted(job.temp_paths, key=lambda item: len(item.parts), reverse=True):
-            try:
-                if path.is_dir():
-                    shutil.rmtree(path)
-                else:
-                    path.unlink(missing_ok=True)
-            except OSError:
-                pass
+        try:
+            if job.workspace is not None:
+                await job.workspace.cleanup()
+            else:
+                for path in sorted(job.temp_paths, key=lambda item: len(item.parts), reverse=True):
+                    try:
+                        if path.is_dir():
+                            shutil.rmtree(path)
+                        else:
+                            path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+        finally:
+            if job.preparation_lease is not None:
+                await job.preparation_lease.release()
+                job.preparation_lease = None
 
     def _cleanup_stale_temp_dirs(self) -> None:
-        temp_dir = Path(tempfile.gettempdir())
+        from asr_server.audio.workspace import service_temporary_root
+        temp_dir = service_temporary_root()
         for path in temp_dir.glob("asr_job_*"):
             try:
                 if path.is_dir():

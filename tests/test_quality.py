@@ -393,7 +393,7 @@ async def test_resegmented_speech_with_silent_subwindow_completes(tmp_path: Path
 
     # Fixed windows isolate retry behavior from the independently tested planner.
     windows = [QualityChunk(index, index * 60, (index + 1) * 60, index * 60, (index + 1) * 60) for index in range(4)]
-    monkeypatch.setattr("asr_server.quality.pipeline.plan_quality_chunks", lambda *_args: (windows, 240))
+    monkeypatch.setattr("asr_server.quality.pipeline.plan_quality_chunks", lambda *_args, **_kwargs: (windows, 240))
     samples = array("h", [100]) * (240 * 16000)
     samples[30 * 16000:60 * 16000] = array("h", [0]) * (30 * 16000)
     source = tmp_path / "speech-and-silence.wav"

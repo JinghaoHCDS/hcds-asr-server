@@ -6,8 +6,9 @@ from typing import Any
 import pytest
 
 from asr_server.adapters.base import TranscriptionSegment
-from asr_server.adapters.moss import MODEL_REPOS, MossTranscribeDiarizeAdapter, _MossHelpers, _MossWorkerBackend
+from asr_server.adapters.moss import MossTranscribeDiarizeAdapter, _MossHelpers, _MossWorkerBackend
 from asr_server.errors import AsrError
+from asr_server.registry import MODEL_SOURCES, MOSS_MODEL_ID
 
 
 class FakeWorker:
@@ -60,11 +61,6 @@ class FakeTransport:
         self.conn.send({"id": len(self.conn.sent) + 1, "op": op, **payload})
         return self.conn.recv()["result"]
 
-
-def test_moss_model_repo_uses_fixed_hf_model_id() -> None:
-    assert MODEL_REPOS == {
-        "moss-transcribe-diarize-0.9b": "OpenMOSS-Team/MOSS-Transcribe-Diarize",
-    }
 
 
 async def test_moss_load_and_transcribe_use_official_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,7 +156,8 @@ async def test_moss_load_and_transcribe_use_official_helpers(monkeypatch: pytest
         raise ModuleNotFoundError(name)
 
     monkeypatch.setattr("asr_server.adapters.moss.importlib.import_module", fake_import_module)
-    adapter = _MossWorkerBackend("moss-transcribe-diarize-0.9b")
+    repo, revision = MODEL_SOURCES[MOSS_MODEL_ID]
+    adapter = _MossWorkerBackend(MOSS_MODEL_ID, repository=repo, revision=revision)
 
     await adapter.load("transformers", "cuda", "auto", max_new_tokens=2048)
     result = await adapter.transcribe(
@@ -179,7 +176,10 @@ async def test_moss_load_and_transcribe_use_official_helpers(monkeypatch: pytest
     assert result.generation.prompt_tokens == 321
     assert result.generation.generated_tokens == 111
     assert result.generation.max_new_tokens == 1024
-    assert ("model_repo", "OpenMOSS-Team/MOSS-Transcribe-Diarize") in calls
+    assert ("model_repo", repo) in calls
+    assert ("processor_repo", repo) in calls
+    assert ("model_revision", revision) in calls
+    assert ("processor_revision", revision) in calls
     assert ("model_trust_remote_code", True) in calls
     assert ("model_dtype", "auto") in calls
     assert ("processor_trust_remote_code", True) in calls

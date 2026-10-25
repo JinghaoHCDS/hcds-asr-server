@@ -1,0 +1,35 @@
+{
+  "pre_migration": {
+    "schema": 2,
+    "jobs": 1,
+    "versions": 2,
+    "version_digests": [
+      "549d42e422f12f352ea55945bb79b3344995105139abe56d352b9f6cc26cb531",
+      "1dcb46748e326c4666e66751cc2b43c009a94ecab7c0bdec9f529b9a20d01b56"
+    ],
+    "integrity": "ok"
+  },
+  "post_migration": {
+    "schema": 3,
+    "jobs": 1,
+    "versions": 2,
+    "version_digests": [
+      "549d42e422f12f352ea55945bb79b3344995105139abe56d352b9f6cc26cb531",
+      "1dcb46748e326c4666e66751cc2b43c009a94ecab7c0bdec9f529b9a20d01b56"
+    ],
+    "integrity": "ok"
+  },
+  "live_after_restart": {
+    "schema": 3,
+    "jobs": 1,
+    "versions": 2,
+    "version_digests": [
+      "549d42e422f12f352ea55945bb79b3344995105139abe56d352b9f6cc26cb531",
+      "1dcb46748e326c4666e66751cc2b43c009a94ecab7c0bdec9f529b9a20d01b56"
+    ],
+    "integrity": "ok"
+  },
+  "migration_ms": 2.2349159989971668,
+  "backup_restore_source_matches": false,
+  "source_note": "Backup source digest includes local changes and changed during ongoing implementation. Data restored and verified; old-code production rollback was not executed."
+}

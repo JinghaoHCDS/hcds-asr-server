@@ -125,11 +125,12 @@ def test_offline_service_is_explicit(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(("os_name", "kernel"), [("Darwin", "local-test"), ("Linux", "6.12-generic")])
-def test_real_gpu_deploy_fails_before_mutation_outside_wsl(tmp_path: Path, os_name: str, kernel: str) -> None:
+@pytest.mark.parametrize("adapter", ["qwen", "registered"])
+def test_real_gpu_deploy_fails_before_mutation_outside_wsl(tmp_path: Path, os_name: str, kernel: str, adapter: str) -> None:
     checkout, environment, calls = deployment_sandbox(tmp_path)
     environment.update(MOCK_OS=os_name, MOCK_KERNEL=kernel)
 
-    result = run_deploy(checkout, environment)
+    result = run_deploy(checkout, environment, "--adapter", adapter)
 
     assert result.returncode != 0
     assert "WSL2" in result.stderr
@@ -137,11 +138,12 @@ def test_real_gpu_deploy_fails_before_mutation_outside_wsl(tmp_path: Path, os_na
     assert not (checkout / ".venv").exists()
 
 
-def test_wsl_gpu_install_uses_explicit_cuda_source(tmp_path: Path) -> None:
+@pytest.mark.parametrize("adapter", ["qwen", "registered"])
+def test_wsl_gpu_install_uses_explicit_cuda_source(tmp_path: Path, adapter: str) -> None:
     checkout, environment, calls = deployment_sandbox(tmp_path)
     environment.update(MOCK_OS="Linux", MOCK_KERNEL="6.6.87-microsoft-standard-WSL2")
 
-    result = run_deploy(checkout, environment, "--skip-cuda-check", "--skip-qwen-backend-smoke", "--no-enable-service")
+    result = run_deploy(checkout, environment, "--adapter", adapter, "--skip-cuda-check", "--skip-qwen-backend-smoke", "--no-enable-service")
 
     assert result.returncode == 0, result.stderr
     commands = recorded_calls(calls)

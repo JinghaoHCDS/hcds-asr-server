@@ -4,11 +4,14 @@ import asyncio
 import io
 import json
 import shutil
+import sqlite3
 import threading
 import wave
 from dataclasses import replace
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -230,6 +233,121 @@ async def test_admin_password_reset_revokes_sessions(workbench: tuple[FastAPI, W
         assert (await old.get("/api/auth/me")).status_code == 401
 
 
+async def test_summary_etag_and_admin_queue_do_not_return_body(workbench: tuple[FastAPI, WorkbenchService, AsyncClient]) -> None:
+    _app, service, client = workbench
+    await login(client)
+    job_id = await submit(client)
+    await completed(client, job_id)
+    summary = (await client.get("/api/jobs?view=summary&limit=1")).json()
+    assert summary["jobs"][0]["id"] == job_id
+    assert summary["next_cursor"] is None
+    assert "result" not in summary["jobs"][0]
+    assert "text" not in summary["jobs"][0]["progress"]
+    detail = await client.get(f"/api/jobs/{job_id}")
+    assert detail.json()["result"]["text"] == "你好世界"
+    etag = detail.headers["etag"]
+    unchanged = await client.get(f"/api/jobs/{job_id}", headers={"If-None-Match": etag})
+    assert unchanged.status_code == 304 and not unchanged.content
+    await login(client, "bob", "bob-password")
+    assert not (await client.get(f"/api/jobs?view=summary&ids={job_id}")).json()["jobs"]
+    assert (await client.get(f"/api/jobs/{job_id}", headers={"If-None-Match": etag})).status_code == 404
+
+    saved = service.store.job(job_id)
+    saved["status"] = "queued"
+    service.store.save_job(saved)
+    await login(client, "admin", "correct-password")
+    queue = (await client.get("/api/admin/status")).json()["queue"]
+    assert queue[0]["id"] == job_id
+    assert not {"filename", "progress", "request", "result", "error"}.intersection(queue[0])
+    assert (await client.get(f"/api/jobs/{job_id}", headers={"If-None-Match": etag})).status_code == 404
+
+
+async def test_prefetch_cancel_releases_preparation_and_preserves_fifo(workbench: tuple[FastAPI, WorkbenchService, AsyncClient], monkeypatch: pytest.MonkeyPatch) -> None:
+    app, service, client = workbench
+    app.state.job_manager.scheduler.prefetch = True
+    inference_entered, inference_release, prepare_entered = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_normalize = getattr(service_module, "normalize_audio_path_to_wav_async")
+    original_run = getattr(service_module, "run_transcription_path")
+    normalizations = 0
+    calls: list[str] = []
+    async def normalize(source: Path, output: Path, **kwargs: Any) -> NormalizedAudioPath:
+        nonlocal normalizations
+        normalizations += 1
+        if normalizations == 2:
+            output.write_bytes(b"partial decoder output")
+            prepare_entered.set()
+            await asyncio.Event().wait()
+        normalized: NormalizedAudioPath = await original_normalize(source, output, **kwargs)
+        return normalized
+    async def infer(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(str(kwargs["normalized_asset"].owner))
+        if len(calls) == 1:
+            inference_entered.set()
+            await inference_release.wait()
+        result: dict[str, Any] = await original_run(*args, **kwargs)
+        return result
+    monkeypatch.setattr(service_module, "normalize_audio_path_to_wav_async", normalize)
+    monkeypatch.setattr(service_module, "run_transcription_path", infer)
+    await login(client)
+    first = await submit(client, key="prefetch-first")
+    await asyncio.wait_for(inference_entered.wait(), 2)
+    second = await submit(client, key="prefetch-cancel")
+    await asyncio.wait_for(prepare_entered.wait(), 2)
+    cancelled = await client.post(f"/api/jobs/{second}/cancel")
+    assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
+    assert (service.job_dir(second) / "source").exists()
+    assert not (service.job_dir(second) / "audio.partial.wav").exists()
+    assert app.state.workspace_manager._reserved_upload_bytes == 0
+    third = await submit(client, key="prefetch-third")
+    inference_release.set()
+    await completed(client, first)
+    await completed(client, third)
+    assert calls == [first, third]
+    assert normalizations == 3
+
+
+async def test_workbench_and_temporary_disk_reservations_share_one_budget(workbench: tuple[FastAPI, WorkbenchService, AsyncClient], monkeypatch: pytest.MonkeyPatch) -> None:
+    app, service, client = workbench
+    free = [1000]
+    monkeypatch.setattr("asr_server.audio.workspace.shutil.disk_usage", lambda _path: SimpleNamespace(free=free[0]))
+    manager = app.state.workspace_manager
+    owner = service.store.user_for_login("alice")
+    assert owner is not None
+    upload = await service.create_upload(owner["id"], "reserved.wav", 700)
+    assert manager.pending_disk_bytes(service.store.root) == 700
+    transient = await manager.reserve_resource(300, service.store.root)
+    with pytest.raises(AsrError) as busy:
+        await service.create_upload(owner["id"], "cannot-fit.wav", 1)
+    assert busy.value.code == "storage_unavailable"
+    await transient.release()
+
+    original = service.store.connection
+    @contextmanager
+    def reject_commit() -> Iterator[sqlite3.Connection]:
+        with original() as db:
+            db.set_authorizer(lambda operation, table, _column, _database, _source:
+                sqlite3.SQLITE_DENY if operation == sqlite3.SQLITE_INSERT and table == "uploads" else sqlite3.SQLITE_OK)
+            yield db
+    existing = set((service.store.root / "uploads").iterdir())
+    monkeypatch.setattr(service.store, "connection", reject_commit)
+    with pytest.raises(sqlite3.DatabaseError):
+        await service.create_upload(owner["id"], "commit-fails.wav", 100)
+    monkeypatch.setattr(service.store, "connection", original)
+    assert set((service.store.root / "uploads").iterdir()) == existing
+    assert manager.pending_disk_bytes(service.store.root) == 700
+
+    free[0] = 900
+    await service.append_upload(owner["id"], upload["id"], 0, b"a" * 100)
+    assert service.store.future_disk_reservations() == {"upload:" + upload["id"]: 600}
+    assert manager.pending_disk_bytes(service.store.root) == 600
+    with pytest.raises(AsrError):
+        await manager.reserve_resource(301, service.store.root)
+    await login(client)
+    assert (await client.delete(f"/api/uploads/{upload['id']}")).status_code == 204
+    assert not service.store.future_disk_reservations()
+    assert manager.pending_disk_bytes(service.store.root) == 0
+
+
 def test_store_reopens_with_hashed_credentials(tmp_path: Path) -> None:
     root = tmp_path / "data"
     first = WorkbenchStore(root)
@@ -296,7 +414,7 @@ async def test_pending_alignment_survives_full_queue(workbench: tuple[FastAPI, W
     job_id = await submit(client)
     await completed(client, job_id)
     enqueue = app.state.job_manager.enqueue_external
-    async def full(key: str, operation: Any) -> None:
+    async def full(key: str, operation: Any, **kwargs: Any) -> None:
         raise AsrError(429, "job_queue_full", "full")
     monkeypatch.setattr(app.state.job_manager, "enqueue_external", full)
     response = await client.patch(f"/api/jobs/{job_id}/segments/segment-0", json={"text": "等待对齐", "base_version": 1})

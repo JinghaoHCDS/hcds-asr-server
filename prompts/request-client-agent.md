@@ -1,5 +1,7 @@
 # 请求端 Agent 提示词
 
+> 2026-10-25 平台扩展遵循 [平台运行契约](../docs/asr-platform-runtime.md)：所有 HTTP 推理共享 FIFO，短同步也会排队；工作台可显式选择支持的模型/profile，并提供摘要分页、revision/ETag；日志可按 job/trace 关联。历史内存-only限制只适用于旧 `/v1` owner。
+
 > 2026-10 扩展：工作台 `/api/**` 使用 SQLite、个人 Cookie 和七天保留；旧 `/v1/**` 继续内存任务与原鉴权，新增 `quality_profile` 默认 `legacy`。历史“不做网页/数据库”仅适用旧阶段，以 [工作台契约](../docs/product-workbench.md) 和项目 AGENTS 为准。
 
 部署路径和 LAN IP 由用户环境决定；示例 `YOUR_WINDOWS_LAN_IP` 与 `/path/to/` 必须替换。历史 Mac / Arch 验收不代表其他平台已实测。

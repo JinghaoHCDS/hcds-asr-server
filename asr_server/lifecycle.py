@@ -11,6 +11,7 @@ from typing import Any, Protocol, TypeVar
 
 from asr_server.adapters.base import AudioInput, AsrAdapter, TimestampItem, TranscriptionResult, TranscriptionTimings
 from asr_server.errors import AsrError
+from asr_server.observability import emit
 from asr_server.registry import Backend, ModelDefinition, ModelStatus
 
 
@@ -61,6 +62,7 @@ class ModelRuntime:
 
     def model_summary(self) -> dict[str, object]:
         return {
+            **self.definition.discovery(),
             "id": self.definition.id,
             "provider": self.definition.provider,
             "status": self.status,
@@ -213,6 +215,7 @@ class ModelLifecycleManager:
                     if runtime.status == "loaded":
                         await self._unload_now(runtime, cuda_empty_cache=True)
                     runtime.status = "loading"
+                    emit("model.loading", model_id=model_id, engine_id=runtime.definition.engine_id, model_revision=runtime.definition.revision)
                     try:
                         await _call_adapter(lambda: runtime.adapter.load(resolved_backend, device, dtype))
                     except Exception:
@@ -226,6 +229,7 @@ class ModelLifecycleManager:
                     runtime.dtype = dtype
                     runtime.load_config = requested_config
                     runtime.loaded_at = utc_now_iso()
+                    emit("model.loaded", model_id=model_id, engine_id=runtime.definition.engine_id)
                     return {"id": model_id, "status": runtime.status, "message": "model loaded"}
 
     async def unload_model(
@@ -643,6 +647,7 @@ class ModelLifecycleManager:
             if runtime.status in ("unloaded", "error") or runtime.backend != resolved_backend:
                 runtime.status = "loading"
                 load_started = perf_counter()
+                emit("model.loading", model_id=runtime.definition.id, engine_id=runtime.definition.engine_id, model_revision=runtime.definition.revision)
                 try:
                     await _call_adapter(
                         lambda: runtime.adapter.load(resolved_backend, "cuda", "auto")
@@ -664,6 +669,7 @@ class ModelLifecycleManager:
                     runtime.definition.revision,
                 )
                 runtime.loaded_at = utc_now_iso()
+                emit("model.loaded", model_id=runtime.definition.id, duration_ms=load_ms)
                 runtime.rejecting_new_requests = False
             runtime.active_requests += 1
             return resolved_backend, load_ms
@@ -687,8 +693,10 @@ class ModelLifecycleManager:
         if cancel_idle_task:
             self._cancel_idle_unload(runtime)
         runtime.status = "unloading"
+        emit("model.unloading", model_id=runtime.definition.id)
         await _call_adapter(lambda: runtime.adapter.unload(cuda_empty_cache))
         runtime.status = "unloaded"
+        emit("model.unloaded", model_id=runtime.definition.id)
         runtime.rejecting_new_requests = False
         runtime.backend = None
         runtime.device = None

@@ -125,7 +125,9 @@ def split_audio(
     max_chunk_seconds: float | None,
     overlap_seconds: float | None,
     hard_chunk_seconds: float = DEFAULT_HARD_CHUNK_SECONDS,
+    cancel_event: threading.Event | None = None,
 ) -> SplitResult:
+    _check_cancel(cancel_event)
     requested_strategy = split_strategy
     strategy = _parse_strategy(split_strategy)
     metadata = inspect_audio(audio)
@@ -137,9 +139,10 @@ def split_audio(
             {"duration_seconds": metadata.duration_seconds, "max_audio_seconds_per_file": MAX_AUDIO_SECONDS_PER_FILE},
         )
 
-    chunk_seconds = max_chunk_seconds or DEFAULT_SOFT_CHUNK_SECONDS
+    chunk_seconds = DEFAULT_SOFT_CHUNK_SECONDS if max_chunk_seconds is None else max_chunk_seconds
     overlap = min(DEFAULT_OVERLAP_SECONDS, chunk_seconds / 10) if overlap_seconds is None else overlap_seconds
     _validate_chunk_options(chunk_seconds, overlap, hard_chunk_seconds)
+    _window_parameters(chunk_seconds, overlap, metadata.sample_rate or 16_000)
 
     if strategy == "none":
         if metadata.duration_seconds > hard_chunk_seconds:
@@ -168,7 +171,7 @@ def split_audio(
 
     warnings: list[str] = []
     if strategy in {"auto", "silero"}:
-        silero_chunks, silero_warning = _try_split_silero(audio, metadata, chunk_seconds, overlap)
+        silero_chunks, silero_warning = _try_split_silero(audio, metadata, chunk_seconds, overlap, cancel_event=cancel_event)
         if silero_warning is not None:
             warnings.append(silero_warning)
         if silero_chunks:
@@ -185,7 +188,7 @@ def split_audio(
             )
 
     if strategy in {"auto", "silero", "energy"}:
-        energy_chunks = _split_energy(audio, metadata, chunk_seconds, overlap)
+        energy_chunks = _split_energy(audio, metadata, chunk_seconds, overlap, cancel_event=cancel_event)
         if energy_chunks:
             return SplitResult(
                 strategy="energy",
@@ -211,9 +214,9 @@ def split_audio(
                 hard_chunk_seconds=hard_chunk_seconds,
             )
 
-    chunks = _split_wav(audio, metadata, chunk_seconds, overlap)
+    chunks = _split_wav(audio, metadata, chunk_seconds, overlap, cancel_event=cancel_event)
     if chunks is None:
-        chunks = _split_raw(audio, metadata, chunk_seconds, overlap)
+        chunks = _split_raw(audio, metadata, chunk_seconds, overlap, cancel_event=cancel_event)
     return SplitResult(
         strategy="fixed",
         requested_strategy=requested_strategy,
@@ -248,6 +251,7 @@ def split_audio_path(
     cancel_event: threading.Event | None = None,
     hard_chunk_seconds: float = DEFAULT_HARD_CHUNK_SECONDS,
 ) -> PathSplitResult:
+    _check_cancel(cancel_event)
     requested_strategy = split_strategy
     strategy = _parse_strategy(split_strategy)
     metadata = inspect_audio_path(audio_path)
@@ -258,9 +262,10 @@ def split_audio_path(
             "audio is longer than the server file duration limit",
             {"duration_seconds": metadata.duration_seconds, "max_audio_seconds_per_file": MAX_AUDIO_SECONDS_PER_FILE},
         )
-    chunk_seconds = max_chunk_seconds or DEFAULT_SOFT_CHUNK_SECONDS
+    chunk_seconds = DEFAULT_SOFT_CHUNK_SECONDS if max_chunk_seconds is None else max_chunk_seconds
     overlap = min(DEFAULT_OVERLAP_SECONDS, chunk_seconds / 10) if overlap_seconds is None else overlap_seconds
     _validate_chunk_options(chunk_seconds, overlap, hard_chunk_seconds)
+    _window_parameters(chunk_seconds, overlap, metadata.sample_rate or 16_000)
     warnings: list[str] = []
     vad_backend: str | None = None
     speech_intervals: tuple[tuple[float, float], ...] = ()
@@ -290,13 +295,13 @@ def split_audio_path(
             )
         if intervals:
             speech_intervals = tuple(intervals)
-            windows = _pack_vad_intervals(intervals, chunk_seconds, overlap)
+            windows = _pack_vad_intervals(intervals, chunk_seconds, overlap, sample_rate=metadata.sample_rate or 16_000, cancel_event=cancel_event)
             resolved_strategy = "energy"
             vad_backend = "energy"
         else:
             if strategy in {"auto", "silero", "energy"}:
                 warnings.append("energy_vad_no_speech_fallback")
-            windows = _chunk_windows(metadata.duration_seconds, chunk_seconds, overlap)
+            windows = _chunk_windows(metadata.duration_seconds, chunk_seconds, overlap, sample_rate=metadata.sample_rate or 16_000, cancel_event=cancel_event)
             resolved_strategy = "fixed"
     _validate_window_count(windows)
     return PathSplitResult(
@@ -313,7 +318,16 @@ def split_audio_path(
     )
 
 
+def _check_cancel(cancel_event: threading.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise SplitCancelled()
+
+
 def _validate_chunk_options(max_chunk_seconds: float, overlap_seconds: float, hard_chunk_seconds: float) -> None:
+    if not all(math.isfinite(value) for value in (max_chunk_seconds, overlap_seconds, hard_chunk_seconds)):
+        raise AsrError(400, "bad_request", "chunk options must be finite numbers")
+    if hard_chunk_seconds <= 0:
+        raise AsrError(400, "bad_request", "hard_chunk_seconds must be greater than 0")
     if max_chunk_seconds <= 0:
         raise AsrError(400, "bad_request", "max_chunk_seconds must be greater than 0")
     if max_chunk_seconds > hard_chunk_seconds:
@@ -357,44 +371,69 @@ def _single_chunk(
     )
 
 
-def _chunk_windows(duration_seconds: float, chunk_seconds: float, overlap_seconds: float) -> list[tuple[float, float]]:
-    windows: list[tuple[float, float]] = []
-    start = 0.0
-    while start < duration_seconds:
-        end = min(start + chunk_seconds, duration_seconds)
-        windows.append((start, end))
-        if end >= duration_seconds:
+def _window_parameters(chunk_seconds: float, overlap_seconds: float, sample_rate: int) -> tuple[int, int]:
+    if sample_rate <= 0 or not all(math.isfinite(value) for value in (chunk_seconds, overlap_seconds)):
+        raise AsrError(400, "bad_request", "chunk options and sample rate must be finite and valid")
+    chunk_frames = round(chunk_seconds * sample_rate)
+    overlap_frames = round(overlap_seconds * sample_rate)
+    if chunk_frames < 1 or overlap_frames < 0 or overlap_frames >= chunk_frames:
+        raise AsrError(400, "bad_request", "chunk options do not advance by at least one audio frame")
+    return chunk_frames, chunk_frames - overlap_frames
+
+
+def _append_window(windows: list[tuple[float, float]], start: int, end: int, sample_rate: int,
+                   cancel_event: threading.Event | None) -> None:
+    _check_cancel(cancel_event)
+    if len(windows) >= MAX_CHUNKS_PER_FILE:
+        _raise_window_count(len(windows) + 1)
+    if end <= start:
+        raise AsrError(400, "bad_request", "audio window must contain at least one frame")
+    windows.append((start / sample_rate, end / sample_rate))
+
+
+def _append_interval_windows(windows: list[tuple[float, float]], start: int, end: int,
+                             chunk_frames: int, step_frames: int, sample_rate: int,
+                             cancel_event: threading.Event | None) -> None:
+    _check_cancel(cancel_event)
+    # Every VAD interval consumes the same list's remaining allowance.
+    count = 0 if end <= start else 1 + max(0, (end - start - chunk_frames + step_frames - 1) // step_frames)
+    if len(windows) + count > MAX_CHUNKS_PER_FILE:
+        _raise_window_count(len(windows) + count)
+    cursor = start
+    while cursor < end:
+        window_end = min(cursor + chunk_frames, end)
+        _append_window(windows, cursor, window_end, sample_rate, cancel_event)
+        if window_end == end:
             break
-        start = end - overlap_seconds
-        if len(windows) > MAX_CHUNKS_PER_FILE:
-            _validate_window_count(windows)
-    return windows
+        cursor += step_frames
+
+
+def _chunk_windows(duration_seconds: float, chunk_seconds: float, overlap_seconds: float, *,
+                   sample_rate: int = 16_000,
+                   cancel_event: threading.Event | None = None) -> list[tuple[float, float]]:
+    return _interval_windows(0.0, duration_seconds, chunk_seconds, overlap_seconds,
+                             sample_rate=sample_rate, cancel_event=cancel_event)
+
+
+def _raise_window_count(count: int) -> None:
+    raise AsrError(422, "duration_limit_exceeded", "audio split would create too many chunks",
+                   {"chunk_count": count, "max_chunks_per_file": MAX_CHUNKS_PER_FILE})
 
 
 def _validate_window_count(windows: list[tuple[float, float]]) -> None:
     if len(windows) > MAX_CHUNKS_PER_FILE:
-        raise AsrError(
-            422,
-            "duration_limit_exceeded",
-            "audio split would create too many chunks",
-            {"chunk_count": len(windows), "max_chunks_per_file": MAX_CHUNKS_PER_FILE},
-        )
+        _raise_window_count(len(windows))
 
 
-def _interval_windows(
-    start: float,
-    end: float,
-    chunk_seconds: float,
-    overlap_seconds: float,
-) -> list[tuple[float, float]]:
+def _interval_windows(start: float, end: float, chunk_seconds: float, overlap_seconds: float, *,
+                      sample_rate: int = 16_000,
+                      cancel_event: threading.Event | None = None) -> list[tuple[float, float]]:
+    if not all(math.isfinite(value) for value in (start, end)) or start < 0 or end < start:
+        raise AsrError(400, "bad_request", "audio interval must be finite and ordered")
+    chunk_frames, step_frames = _window_parameters(chunk_seconds, overlap_seconds, sample_rate)
     windows: list[tuple[float, float]] = []
-    cursor = start
-    while cursor < end:
-        window_end = min(cursor + chunk_seconds, end)
-        windows.append((cursor, window_end))
-        if window_end >= end:
-            break
-        cursor = window_end - overlap_seconds
+    _append_interval_windows(windows, round(start * sample_rate), round(end * sample_rate),
+                             chunk_frames, step_frames, sample_rate, cancel_event)
     return windows
 
 
@@ -403,17 +442,21 @@ def _try_split_silero(
     metadata: AudioMetadata,
     chunk_seconds: float,
     overlap_seconds: float,
+    *,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[list[AudioChunk], str | None]:
     try:
-        intervals = _silero_intervals(audio, metadata, padding_seconds=overlap_seconds)
+        intervals = _silero_intervals(audio, metadata, padding_seconds=overlap_seconds, cancel_event=cancel_event)
+    except SplitCancelled:
+        raise
     except _SileroUnavailable as exc:
         return [], f"silero_vad_unavailable: {exc}"
     except Exception as exc:
         return [], f"silero_vad_failed: {type(exc).__name__}"
     if not intervals:
         return [], "silero_vad_no_speech_fallback"
-    windows = _pack_vad_intervals(intervals, chunk_seconds, overlap_seconds)
-    chunks = _slice_wav_windows(audio, metadata, windows) or []
+    windows = _pack_vad_intervals(intervals, chunk_seconds, overlap_seconds, sample_rate=metadata.sample_rate or 16_000, cancel_event=cancel_event)
+    chunks = _slice_wav_windows(audio, metadata, windows, cancel_event=cancel_event) or []
     if not chunks:
         return [], "silero_vad_slice_failed_fallback"
     return chunks, None
@@ -424,12 +467,14 @@ def _split_energy(
     metadata: AudioMetadata,
     chunk_seconds: float,
     overlap_seconds: float,
+    *,
+    cancel_event: threading.Event | None = None,
 ) -> list[AudioChunk]:
-    intervals = _energy_intervals(audio, metadata, padding_seconds=overlap_seconds)
+    intervals = _energy_intervals(audio, metadata, padding_seconds=overlap_seconds, cancel_event=cancel_event)
     if not intervals:
         return []
-    windows = _pack_vad_intervals(intervals, chunk_seconds, overlap_seconds)
-    return _slice_wav_windows(audio, metadata, windows) or []
+    windows = _pack_vad_intervals(intervals, chunk_seconds, overlap_seconds, sample_rate=metadata.sample_rate or 16_000, cancel_event=cancel_event)
+    return _slice_wav_windows(audio, metadata, windows, cancel_event=cancel_event) or []
 
 
 class _SileroUnavailable(RuntimeError):
@@ -441,6 +486,7 @@ def _silero_intervals(
     metadata: AudioMetadata,
     *,
     padding_seconds: float,
+    cancel_event: threading.Event | None = None,
 ) -> list[tuple[float, float]]:
     if metadata.format != "wav":
         raise _SileroUnavailable("audio is not wav")
@@ -474,6 +520,7 @@ def _silero_intervals(
     speech_timestamps = get_speech_timestamps(waveform, model, sampling_rate=frame_rate)
     intervals = []
     for item in speech_timestamps:
+        _check_cancel(cancel_event)
         if not isinstance(item, dict):
             continue
         start_sample = int(item.get("start", 0))
@@ -498,6 +545,7 @@ def _energy_intervals(
     metadata: AudioMetadata,
     *,
     padding_seconds: float,
+    cancel_event: threading.Event | None = None,
 ) -> list[tuple[float, float]]:
     if metadata.format != "wav":
         return []
@@ -518,6 +566,7 @@ def _energy_intervals(
     frame_samples = max(int(frame_rate * VAD_FRAME_SECONDS), 1)
     rms_values = []
     for offset in range(0, len(samples), frame_samples):
+        _check_cancel(cancel_event)
         frame = samples[offset : offset + frame_samples]
         if not frame:
             continue
@@ -530,6 +579,7 @@ def _energy_intervals(
     raw_intervals: list[tuple[float, float]] = []
     start_frame: int | None = None
     for index, is_speech in enumerate(speech_frames):
+        _check_cancel(cancel_event)
         if is_speech and start_frame is None:
             start_frame = index
         if not is_speech and start_frame is not None:
@@ -538,9 +588,10 @@ def _energy_intervals(
     if start_frame is not None:
         raw_intervals.append((start_frame * VAD_FRAME_SECONDS, len(speech_frames) * VAD_FRAME_SECONDS))
 
-    merged = _merge_vad_intervals(raw_intervals)
+    merged = _merge_vad_intervals(raw_intervals, cancel_event=cancel_event)
     padded = []
     for start, end in merged:
+        _check_cancel(cancel_event)
         if end - start < VAD_MIN_SPEECH_SECONDS:
             continue
         padded.append((max(start - padding_seconds, 0.0), min(end + padding_seconds, metadata.duration_seconds)))
@@ -578,6 +629,7 @@ def _energy_intervals_path(
     raw_intervals: list[tuple[float, float]] = []
     start_frame: int | None = None
     for index, rms in enumerate(rms_values):
+        _check_cancel(cancel_event)
         is_speech = rms >= threshold
         if is_speech and start_frame is None:
             start_frame = index
@@ -587,15 +639,18 @@ def _energy_intervals_path(
     if start_frame is not None:
         raw_intervals.append((start_frame * VAD_FRAME_SECONDS, len(rms_values) * VAD_FRAME_SECONDS))
     padded = []
-    for start, end in _merge_vad_intervals(raw_intervals):
+    for start, end in _merge_vad_intervals(raw_intervals, cancel_event=cancel_event):
+        _check_cancel(cancel_event)
         if end - start >= VAD_MIN_SPEECH_SECONDS:
             padded.append((max(start - padding_seconds, 0.0), min(end + padding_seconds, metadata.duration_seconds)))
     return padded
 
 
-def _merge_vad_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
+def _merge_vad_intervals(intervals: list[tuple[float, float]], *,
+                         cancel_event: threading.Event | None = None) -> list[tuple[float, float]]:
     merged: list[tuple[float, float]] = []
     for start, end in intervals:
+        _check_cancel(cancel_event)
         if not merged or start - merged[-1][1] > VAD_MIN_SILENCE_SECONDS:
             merged.append((start, end))
             continue
@@ -608,31 +663,39 @@ def _pack_vad_intervals(
     intervals: list[tuple[float, float]],
     chunk_seconds: float,
     overlap_seconds: float,
+    *,
+    sample_rate: int = 16_000,
+    cancel_event: threading.Event | None = None,
 ) -> list[tuple[float, float]]:
+    chunk_frames, step_frames = _window_parameters(chunk_seconds, overlap_seconds, sample_rate)
+    overlap_frames = chunk_frames - step_frames
     windows: list[tuple[float, float]] = []
-    current_start: float | None = None
-    current_end: float | None = None
+    current_start: int | None = None
+    current_end: int | None = None
     for interval_start, interval_end in intervals:
-        if interval_end - interval_start > chunk_seconds:
+        _check_cancel(cancel_event)
+        if not all(math.isfinite(value) for value in (interval_start, interval_end)) or interval_start < 0 or interval_end < interval_start:
+            raise AsrError(400, "bad_request", "VAD interval must be finite and ordered")
+        start, end = round(interval_start * sample_rate), round(interval_end * sample_rate)
+        if end <= start:
+            continue
+        if end - start > chunk_frames:
             if current_start is not None and current_end is not None:
-                windows.append((current_start, current_end))
-                current_start = None
-                current_end = None
-            windows.extend(_interval_windows(interval_start, interval_end, chunk_seconds, overlap_seconds))
+                _append_window(windows, current_start, current_end, sample_rate, cancel_event)
+                current_start = current_end = None
+            _append_interval_windows(windows, start, end, chunk_frames, step_frames, sample_rate, cancel_event)
             continue
         if current_start is None or current_end is None:
-            current_start = interval_start
-            current_end = interval_end
-            continue
-        if interval_end - current_start <= chunk_seconds:
-            current_end = interval_end
-            continue
-        windows.append((current_start, current_end))
-        current_start = max(interval_start - overlap_seconds, 0.0)
-        current_end = interval_end
+            current_start, current_end = start, end
+        elif end - current_start <= chunk_frames:
+            current_end = end
+        else:
+            _append_window(windows, current_start, current_end, sample_rate, cancel_event)
+            current_start, current_end = max(start - overlap_frames, 0), end
+            if current_end - current_start > chunk_frames:
+                current_start = max(end - chunk_frames, start)
     if current_start is not None and current_end is not None:
-        windows.append((current_start, current_end))
-    _validate_window_count(windows)
+        _append_window(windows, current_start, current_end, sample_rate, cancel_event)
     return windows
 
 
@@ -641,10 +704,12 @@ def _split_raw(
     metadata: AudioMetadata,
     chunk_seconds: float,
     overlap_seconds: float,
+    *,
+    cancel_event: threading.Event | None = None,
 ) -> list[AudioChunk]:
     bytes_per_second = len(audio) / metadata.duration_seconds
     chunks = []
-    for index, (start, end) in enumerate(_chunk_windows(metadata.duration_seconds, chunk_seconds, overlap_seconds)):
+    for index, (start, end) in enumerate(_chunk_windows(metadata.duration_seconds, chunk_seconds, overlap_seconds, sample_rate=metadata.sample_rate or 16_000, cancel_event=cancel_event)):
         start_byte = int(start * bytes_per_second)
         end_byte = max(start_byte + 1, int(end * bytes_per_second))
         chunks.append(AudioChunk(index=index, start=start, end=end, audio=audio[start_byte:end_byte]))
@@ -656,16 +721,20 @@ def _split_wav(
     metadata: AudioMetadata,
     chunk_seconds: float,
     overlap_seconds: float,
+    *,
+    cancel_event: threading.Event | None = None,
 ) -> list[AudioChunk] | None:
     if metadata.format != "wav":
         return None
-    return _slice_wav_windows(audio, metadata, _chunk_windows(metadata.duration_seconds, chunk_seconds, overlap_seconds))
+    return _slice_wav_windows(audio, metadata, _chunk_windows(metadata.duration_seconds, chunk_seconds, overlap_seconds, sample_rate=metadata.sample_rate or 16_000, cancel_event=cancel_event), cancel_event=cancel_event)
 
 
 def _slice_wav_windows(
     audio: bytes,
     metadata: AudioMetadata,
     windows: list[tuple[float, float]],
+    *,
+    cancel_event: threading.Event | None = None,
 ) -> list[AudioChunk] | None:
     if metadata.format != "wav":
         return None
@@ -675,8 +744,9 @@ def _slice_wav_windows(
             params = source.getparams()
             chunks = []
             for index, (start, end) in enumerate(windows):
-                start_frame = int(start * frame_rate)
-                end_frame = min(int(end * frame_rate), source.getnframes())
+                _check_cancel(cancel_event)
+                start_frame = round(start * frame_rate)
+                end_frame = min(round(end * frame_rate), source.getnframes())
                 source.setpos(start_frame)
                 frames = source.readframes(max(end_frame - start_frame, 0))
                 output = io.BytesIO()

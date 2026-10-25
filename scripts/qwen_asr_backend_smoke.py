@@ -10,14 +10,13 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from asr_server.adapters.qwen import _qwen_prefill_chat_template
+from asr_server.registry import MODEL_SOURCES
 
 
-DEFAULT_MODEL = "Qwen/Qwen3-ASR-0.6B-hf"
+DEFAULT_MODEL = MODEL_SOURCES["qwen3-asr-0.6b"][0]
 DEFAULT_AUDIO = "test-fixtures/audio/test_short.wav"
-MODEL_REVISIONS = {
-    "Qwen/Qwen3-ASR-0.6B-hf": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
-    "Qwen/Qwen3-ASR-1.7B-hf": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
-}
+MODEL_REVISIONS = {repository: revision for model_id, (repository, revision) in MODEL_SOURCES.items()
+                   if model_id in {"qwen3-asr-0.6b", "qwen3-asr-1.7b"}}
 
 
 def require_cuda_torch() -> Any:

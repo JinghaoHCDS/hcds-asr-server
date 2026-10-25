@@ -30,6 +30,12 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: local API, persistence or worker integration behavior (included by default)",
+    "gpu: explicitly configured real GPU validation",
+    "performance: opt-in measurements without ordinary timing assertions",
+    "release: source/dependency/artifact release validation",
+]
 
 [tool.mypy]
 python_version = "3.12"

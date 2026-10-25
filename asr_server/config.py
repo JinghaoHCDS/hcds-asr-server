@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
-AdapterMode = Literal["mock", "qwen"]
+AdapterMode = Literal["mock", "qwen", "registered"]
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,13 @@ class Settings:
     max_spool_mb: int = 12288
     max_workspace_mb: int = 1280
     max_workspace_files: int = 8
+    receive_slots: int = 4
+    receive_timeout_seconds: float = 30.0
+    multipart_metadata_bytes: int = 256 * 1024
+    preprocessing_prefetch: bool = False
+    log_level: str = "INFO"
+    log_format: str = "json"
+    log_dir: Path | None = None
     workbench_enabled: bool = True
     workbench_data_dir: Path = Path("data/workbench")
     workbench_retention_days: int = 7
@@ -44,8 +52,8 @@ class Settings:
 
 def load_settings() -> Settings:
     adapter = os.getenv("ASR_ADAPTER", "mock")
-    if adapter not in {"mock", "qwen"}:
-        raise ValueError("ASR_ADAPTER must be 'mock' or 'qwen'")
+    if adapter not in {"mock", "qwen", "registered"}:
+        raise ValueError("ASR_ADAPTER must be 'mock', 'qwen' or 'registered'")
     adapter_mode = cast(AdapterMode, adapter)
     enable_moss = _env_bool("ASR_ENABLE_MOSS", default=False)
     enable_qwen_alignment = _env_bool("ASR_ENABLE_QWEN_ALIGNMENT", default=False)
@@ -86,6 +94,13 @@ def load_settings() -> Settings:
     if any(value <= 0 for value in workbench_values.values()):
         raise ValueError("ASR_WORKBENCH limits must be positive")
     return Settings(
+        receive_slots=_positive_int("ASR_RECEIVE_SLOTS", 4),
+        receive_timeout_seconds=_positive_float("ASR_RECEIVE_TIMEOUT_SECONDS", 30.0),
+        multipart_metadata_bytes=_positive_int("ASR_MULTIPART_METADATA_BYTES", 256 * 1024),
+        preprocessing_prefetch=_env_bool("ASR_PREPROCESSING_PREFETCH", default=False),
+        log_level=os.getenv("ASR_LOG_LEVEL", "INFO"),
+        log_format=os.getenv("ASR_LOG_FORMAT", "json"),
+        log_dir=Path(os.environ["ASR_LOG_DIR"]) if os.getenv("ASR_LOG_DIR") else None,
         host=os.getenv("ASR_HOST", "0.0.0.0"),
         port=int(os.getenv("ASR_PORT", "18080")),
         public_base_url=os.getenv("ASR_PUBLIC_BASE_URL", "http://127.0.0.1:18080"),
@@ -119,6 +134,13 @@ def load_settings() -> Settings:
     )
 
 
+def _positive_int(name: str, default: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
 def _env_bool(name: str, *, default: bool) -> bool:
     value = os.getenv(name)
     if value is None or value == "":
@@ -133,6 +155,6 @@ def _env_bool(name: str, *, default: bool) -> bool:
 
 def _positive_float(name: str, default: float) -> float:
     value = float(os.getenv(name, str(default)))
-    if value <= 0:
-        raise ValueError(f"{name} must be greater than 0")
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be finite and greater than 0")
     return value

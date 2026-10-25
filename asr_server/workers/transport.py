@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import time
 from collections.abc import Callable
 from multiprocessing.connection import Connection
 from typing import Any
 
 from asr_server.errors import AsrError
+from asr_server.observability import PROTOCOL_VERSION, current_context, emit
+from asr_server.workers.codec import request_envelope
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,7 @@ class ProcessRpcTransport:
         self._process: Any | None = None
         self._conn: Connection | None = None
         self._request_id = 0
+        self._generation = 0
 
     @property
     def pid(self) -> int | None:
@@ -68,7 +72,13 @@ class ProcessRpcTransport:
         child_conn.close()
         self._process = process
         self._conn = parent_conn
-        self.request("ping", timeout_seconds=self._startup_timeout_seconds)
+        self._generation += 1
+        result = self.request("ping", timeout_seconds=self._startup_timeout_seconds)
+        # Historical/custom workers may omit it; an explicitly incompatible
+        # protocol must never continue into expensive model operations.
+        if isinstance(result, dict) and result.get("protocol_version", PROTOCOL_VERSION) != PROTOCOL_VERSION:
+            self._fatal("worker_protocol_version", op="ping")
+        emit("worker.started", worker_pid=self.pid, worker_generation=self._generation, engine_id=self.name)
 
     def request(self, op: str, *, timeout_seconds: float, **payload: object) -> Any:
         conn = self._conn
@@ -80,8 +90,9 @@ class ProcessRpcTransport:
         self._request_id += 1
         request_id = self._request_id
         worker_pid = process.pid
+        started = time.perf_counter()
         try:
-            conn.send({"id": request_id, "op": op, **payload})
+            conn.send(request_envelope(request_id, op, payload, current_context()))
             if not conn.poll(timeout_seconds):
                 self._fatal(
                     "worker_timeout",
@@ -109,6 +120,9 @@ class ProcessRpcTransport:
                 worker_pid=worker_pid,
             )
         if response.get("ok"):
+            emit("worker.rpc_completed", level=logging.DEBUG, operation=op, rpc_request_id=request_id,
+                 worker_pid=worker_pid, worker_generation=self._generation,
+                 duration_ms=(time.perf_counter() - started) * 1000)
             return response.get("result")
         raw_error = response.get("error")
         error = raw_error if isinstance(raw_error, dict) else {}
@@ -117,6 +131,9 @@ class ProcessRpcTransport:
         details.update({"operation": op, "request_id": request_id, "worker_pid": worker_pid})
         code = str(error.get("code", "inference_failed"))
         status_code = int(error.get("status_code", 503))
+        emit("worker.rpc_failed", level=logging.ERROR, operation=op, rpc_request_id=request_id,
+             worker_pid=worker_pid, worker_generation=self._generation, error_code=code,
+             diagnostics=response.get("diagnostics"), duration_ms=(time.perf_counter() - started) * 1000)
         if status_code >= 500:
             details["worker_fatal"] = True
             self.close(force=True)
@@ -139,7 +156,7 @@ class ProcessRpcTransport:
                     cuda_empty_cache=cuda_empty_cache,
                 )
             except AsrError as exc:
-                logger.warning("%s worker graceful shutdown failed: %s", self.name, exc.message)
+                emit("worker.shutdown_failed", level=logging.WARNING, engine_id=self.name, error_code=exc.code)
         process = self._process
         if process is not None and process.is_alive():
             # The worker acknowledges before its outer finally block closes CUDA
@@ -161,6 +178,8 @@ class ProcessRpcTransport:
             if process.is_alive():
                 logger.error("failed to reap %s worker pid=%s", self.name, process.pid)
             else:
+                emit("worker.reaped", worker_pid=process.pid, worker_generation=self._generation,
+                     exit_code=process.exitcode, engine_id=self.name)
                 process.close()
         self._close_connection()
 
@@ -189,6 +208,8 @@ class ProcessRpcTransport:
             "worker_fatal": True,
             **(details or {}),
         }
+        emit("worker.rpc_failed", level=logging.ERROR, operation=op, rpc_request_id=request_id,
+             worker_pid=payload["worker_pid"], worker_generation=self._generation, error_code=reason)
         logger.error(
             "%s worker fatal reason=%s operation=%s request_id=%s pid=%s",
             self.name,

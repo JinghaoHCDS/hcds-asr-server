@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, bytes, date, errorNames, message, phaseName, terminal, type Capabilities, type Job, type User } from './api';
+import { api, bytes, date, errorNames, message, phaseName, terminal, type Capabilities, type Job, type JobPage, type User } from './api';
 import { Icon, type IconName } from './icons';
 import UploadPane from './UploadPane';
 import ResultPane from './ResultPane';
@@ -13,13 +13,17 @@ export default function App() {
   const [page, setPage] = useState<Page>('upload');
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busyJob, setBusyJob] = useState('');
   const polling = useRef(false);
   const currentUser = useRef<User | null>(user);
+  const currentJobs = useRef<Job[]>(jobs);
   currentUser.current = user;
+  currentJobs.current = jobs;
 
   useEffect(() => {
     api<{ user: User }>('/auth/me', {}, true).then(v => setUser(v.user)).catch(() => {}).finally(() => setReady(true));
@@ -33,9 +37,10 @@ export default function App() {
     polling.current = true;
     const expectedUser = currentUser.current?.id;
     try {
-      const data = await api<{ jobs: Job[] }>('/jobs');
+      const data = await api<JobPage>('/jobs?view=summary&limit=50');
       if (currentUser.current?.id !== expectedUser) return;
       setJobs(data.jobs);
+      setNextCursor(data.next_cursor);
       setError('');
     } catch (e) { setError(message(e)); }
     finally { polling.current = false; }
@@ -46,9 +51,41 @@ export default function App() {
     let alive = true;
     api<Capabilities>('/capabilities').then(value => { if (alive) setCaps(value); }).catch(e => { if (alive) setError(message(e)); });
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 3500);
-    return () => { alive = false; window.clearInterval(timer); };
+    let timer: number;
+    const poll = async () => {
+      const active = currentJobs.current.filter(task => !terminal(task.status) || task.alignment_status === 'pending').slice(0, 100);
+      if (document.visibilityState === 'visible' && active.length && !polling.current) {
+        polling.current = true;
+        try {
+          const data = await api<JobPage>(`/jobs?view=summary&limit=100&ids=${active.map(task => encodeURIComponent(task.id)).join(',')}`);
+          if (alive) {
+            const updated = new Map(data.jobs.map(task => [task.id, task]));
+            const watched = new Set(active.map(task => task.id));
+            setJobs(previous => previous.filter(task => !watched.has(task.id) || updated.has(task.id)).map(task => updated.get(task.id) ?? task));
+          }
+        } catch (e) { if (alive) setError(message(e)); }
+        finally { polling.current = false; }
+      }
+      if (alive) timer = window.setTimeout(() => void poll(), document.visibilityState === 'hidden' ? 30000 : 3500);
+    };
+    const visible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    timer = window.setTimeout(() => void poll(), 3500);
+    document.addEventListener('visibilitychange', visible);
+    return () => { alive = false; window.clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
   }, [user, refresh]);
+
+  async function loadMore() {
+    if (nextCursor === null || loadingMore) return;
+    setLoadingMore(true);
+    const expectedUser = currentUser.current?.id;
+    try {
+      const data = await api<JobPage>(`/jobs?view=summary&limit=50&before=${nextCursor}`);
+      if (currentUser.current?.id !== expectedUser) return;
+      setJobs(previous => [...previous, ...data.jobs.filter(task => !previous.some(old => old.id === task.id))]);
+      setNextCursor(data.next_cursor);
+    } catch (e) { setError(message(e)); }
+    finally { setLoadingMore(false); }
+  }
 
   useEffect(() => {
     if (!notice) return;
@@ -96,8 +133,8 @@ export default function App() {
       {error && <div className="banner error" role="alert"><Icon name="alert" size={18} /><span>{error}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setError('')}><Icon name="close" size={16} /></button></div>}
       {notice && <div className="toast" role="status"><Icon name="check" size={18} />{notice}</div>}
       <section hidden={page !== 'upload'}><UploadPane user={user} caps={caps} onSubmitted={() => { void refresh(); api<Capabilities>('/capabilities').then(setCaps).catch(() => {}); setNotice('素材已进入转录队列'); }} onOpenJobs={() => setPage('jobs')} /></section>
-      {page === 'jobs' && <><div className="section-heading"><h2>我的任务 <span className="count">{jobs.length}</span></h2><button className="button ghost small" onClick={() => void refresh()}><Icon name="refresh" size={16} />刷新</button></div>{jobs.length === 0 ? <Empty title="还没有转录任务" detail="上传一段音频或视频，你的结果会保存在这里。" action={() => setPage('upload')} /> : <div className="job-list">{jobs.map(job => <JobCard key={job.id} job={job} busy={busyJob === job.id} onOpen={() => { setActiveId(job.id); setPage('result'); }} onAction={a => void jobAction(job, a)} />)}</div>}<p className="footnote">任务结束后保留 {caps?.retention_days ?? 7} 天。删除后将同时移除音频、文字和编辑记录。</p></>}
-      {page === 'result' && activeId && <ResultPane jobId={activeId} onBack={() => setPage('jobs')} onChanged={() => void refresh()} />}
+      {page === 'jobs' && <><div className="section-heading"><h2>我的任务 <span className="count">{jobs.length}</span></h2><button className="button ghost small" onClick={() => void refresh()}><Icon name="refresh" size={16} />刷新</button></div>{jobs.length === 0 ? <Empty title="还没有转录任务" detail="上传一段音频或视频，你的结果会保存在这里。" action={() => setPage('upload')} /> : <div className="job-list">{jobs.map(job => <JobCard key={job.id} job={job} busy={busyJob === job.id} onOpen={() => { setActiveId(job.id); setPage('result'); }} onAction={a => void jobAction(job, a)} />)}</div>}{nextCursor !== null && <button className="button secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? '正在读取…' : '加载更多任务'}</button>}<p className="footnote">任务结束后保留 {caps?.retention_days ?? 7} 天。删除后将同时移除音频、文字和编辑记录。</p></>}
+      {page === 'result' && activeId && <ResultPane jobId={activeId} models={caps?.models ?? []} onBack={() => setPage('jobs')} onChanged={() => void refresh()} />}
       {page === 'admin' && user.is_admin && <AdminPane />}
       <footer className="page-footer"><span>声笺 <span className="muted">·</span> 把精力留给内容</span><span>本地处理 · 忠实转录 · 可回听校对</span></footer>
     </main>
@@ -114,7 +151,7 @@ export function Empty({ title, detail, action }: { title: string; detail: string
 
 function JobCard({ job, busy, onOpen, onAction }: { job: Job; busy: boolean; onOpen: () => void; onAction: (a: 'cancel' | 'retry' | 'delete') => void }) {
   const progress = job.progress; const active = !terminal(job.status); const percent = Math.max(0, Math.min(100, progress?.percent ?? 0));
-  return <article className="job-card"><div className="file-icon"><Icon name="file" size={24} /></div><div className="job-main"><div className="job-title-row"><button className="text-link job-title" onClick={onOpen}>{job.filename}</button><span className={`badge ${job.status === 'completed' ? 'success' : job.status === 'failed' ? 'danger' : active ? 'processing' : ''}`}>{phaseName(job.status)}</span></div><div className="job-meta"><span>{date(job.created_at)}</span>{job.queue_position ? <span>前方 {job.queue_position} 个任务</span> : progress?.total_chunks ? <span>已完成 {progress.completed_chunks ?? 0} / {progress.total_chunks} 段</span> : null}{job.expires_at && <span>{date(job.expires_at)} 到期</span>}</div>{active && <div className="job-progress"><div className="progress-track"><span style={{ width: `${percent}%` }} /></div><small>{phaseName(progress?.phase || job.status)}{progress?.total_chunks ? ` · ${progress.completed_chunks ?? 0}/${progress.total_chunks}` : ''}</small></div>}{job.error && <p className="inline-error">{errorNames[job.error.code] || job.error.message}</p>}</div><div className="job-actions"><button className="button secondary small" onClick={onOpen}>{job.result ? '查看结果' : '查看任务'}<Icon name="arrow" size={15} /></button>{active ? <button className="button ghost small" disabled={busy || job.status === 'cancel_requested'} onClick={() => onAction('cancel')}>取消</button> : <>{['failed', 'cancelled'].includes(job.status) && <button className="button ghost small" disabled={busy} onClick={() => onAction('retry')}>重试</button>}<button className="button ghost small danger-text" disabled={busy} onClick={() => onAction('delete')}>删除</button></>}</div></article>;
+  return <article className="job-card"><div className="file-icon"><Icon name="file" size={24} /></div><div className="job-main"><div className="job-title-row"><button className="text-link job-title" onClick={onOpen}>{job.filename}</button><span className={`badge ${job.status === 'completed' ? 'success' : job.status === 'failed' ? 'danger' : active ? 'processing' : ''}`}>{phaseName(job.status)}</span></div><div className="job-meta"><span>{date(job.created_at)}</span>{job.queue_position ? <span>前方 {job.queue_position} 个任务</span> : progress?.total_chunks ? <span>已完成 {progress.completed_chunks ?? 0} / {progress.total_chunks} 段</span> : null}{job.expires_at && <span>{date(job.expires_at)} 到期</span>}</div>{active && <div className="job-progress"><div className="progress-track"><span style={{ width: `${percent}%` }} /></div><small>{phaseName(progress?.phase || job.status)}{progress?.total_chunks ? ` · ${progress.completed_chunks ?? 0}/${progress.total_chunks}` : ''}</small></div>}{job.error && <p className="inline-error">{errorNames[job.error.code] || job.error.message}</p>}</div><div className="job-actions"><button className="button secondary small" onClick={onOpen}>{job.result || job.has_result ? '查看结果' : '查看任务'}<Icon name="arrow" size={15} /></button>{active ? <button className="button ghost small" disabled={busy || job.status === 'cancel_requested'} onClick={() => onAction('cancel')}>取消</button> : <>{['failed', 'cancelled'].includes(job.status) && <button className="button ghost small" disabled={busy} onClick={() => onAction('retry')}>重试</button>}<button className="button ghost small danger-text" disabled={busy} onClick={() => onAction('delete')}>删除</button></>}</div></article>;
 }
 
 export function StorageMeter({ used, quota }: { used: number; quota: number }) { return <div className="storage-meter"><div><span>已用空间</span><strong>{bytes(used)} <small>/ {bytes(quota)}</small></strong></div><div className="progress-track"><span style={{ width: `${Math.min(100, quota ? used / quota * 100 : 0)}%` }} /></div></div>; }

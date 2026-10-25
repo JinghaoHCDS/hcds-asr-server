@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+from functools import partial
+from tests.helpers import make_wav as shared_wav
 import wave
 import struct
 import threading
@@ -17,15 +19,7 @@ from asr_server.audio.splitter import SplitCancelled, split_audio, split_audio_p
 from asr_server.errors import AsrError
 
 
-def make_wav(duration_seconds: float, sample_rate: int = 8_000) -> bytes:
-    frame_count = int(duration_seconds * sample_rate)
-    output = io.BytesIO()
-    with wave.open(output, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(b"\x00\x00" * frame_count)
-    return output.getvalue()
+make_wav = partial(shared_wav, amplitude=0, sample_rate=8000, channels=1)
 
 
 def make_segmented_wav(segments: list[tuple[float, int]], sample_rate: int = 16_000) -> bytes:
@@ -364,3 +358,39 @@ def test_path_vad_honors_cancellation_event(tmp_path: Path) -> None:
             overlap_seconds=0.01,
             cancel_event=cancelled,
         )
+
+
+@pytest.mark.parametrize("chunk,overlap", [
+    (0.0, 0.0), (1.0, float("nan")), (float("nan"), 0.0),
+    (float("inf"), 0.0), (1.0, float("inf")), (1.0, 1.0 - 1e-12),
+    (1e-9, 0.0),
+])
+def test_window_parameters_reject_nonfinite_zero_and_nonadvancing_sample_options(
+    tmp_path: Path, chunk: float, overlap: float,
+) -> None:
+    path = tmp_path / "input.wav"
+    path.write_bytes(make_wav(0.1, sample_rate=16_000))
+    for source in (path, path.read_bytes()):
+        with pytest.raises(AsrError) as error:
+            if isinstance(source, Path):
+                split_audio_path(source, split_strategy="energy", max_chunk_seconds=chunk, overlap_seconds=overlap)
+            else:
+                split_audio(source, split_strategy="energy", max_chunk_seconds=chunk, overlap_seconds=overlap)
+        assert error.value.code == "bad_request"
+
+
+def test_vad_windows_share_one_task_limit_and_observe_mid_generation_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(splitter_module, "MAX_CHUNKS_PER_FILE", 3)
+    with pytest.raises(AsrError) as error:
+        splitter_module._pack_vad_intervals([(0, 2), (3, 5)], 1, 0)
+    assert error.value.code == "duration_limit_exceeded"
+    assert error.value.details["chunk_count"] == 4
+
+    cancelled = threading.Event()
+    append = splitter_module._append_window
+    def cancel_after_one(*args: object, **kwargs: object) -> None:
+        append(*args, **kwargs)  # type: ignore[arg-type]
+        cancelled.set()
+    monkeypatch.setattr(splitter_module, "_append_window", cancel_after_one)
+    with pytest.raises(SplitCancelled):
+        splitter_module._interval_windows(0, 2, 1, 0, cancel_event=cancelled)

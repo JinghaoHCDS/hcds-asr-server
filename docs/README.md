@@ -13,11 +13,14 @@
 - [Swagger 说明](docs-endpoint-capabilities.md)：`/docs` 与当前 API 能力说明文本。
 - [验收模板](validation-template.md)：真实 WSL smoke 的记录要求。
 - [仓库清理记录](repository-cleanup.md)：产品化整理中删除、替代和保留的文件。
+- [性能与多 ASR 改进计划](asr-platform-improvement-plan.md)：资源边界、调试日志、性能、模型接入与测试精简的设计背景；实现行为见[平台运行契约](asr-platform-runtime.md)，检查结果见[平台验收](validation-2026-10-25-platform.md)。[Agent 任务包](asr-platform-agent-tasks.md)保留实施职责记录。
 
 ## 验收记录
 
 这些是对应版本和环境的历史证据，不代表所有硬件、发行版、模型或音频质量都已验证。
 
+- [2026-10-25 平台改进](validation-2026-10-25-platform.md)：A–E 实现、本地控制面性能、六小时资源、浏览器、迁移和回滚演练。
+- [2026-10-25 WSL 平台实机](validation-2026-10-25-wsl-platform.md)：真实 Qwen/MOSS、官方对齐、十分钟工作台、检查点恢复及 GPU 对比。
 - [2026-10-22 工作台本地工程验收](validation-2026-10-22-local-workbench.md)：mock 回归、浏览器流程、账号隔离、备份恢复与未验收项。
 - [2026-10-22 Qwen 质量流程与工作台实机验收](validation-2026-10-22-quality-workbench.md)：13.06 秒样本的真实转录、对齐、别名规范、编辑与字幕导出，不代表长音频质量达标。
 - [2026-07-02 Qwen HF native](validation-2026-07-02-wsl-hf-native.md)：0.6B / 1.7B 的 transformers 后端。
@@ -41,3 +44,9 @@
 ## 维护约定
 
 新增或关闭能力时，同步更新 README、部署指南、Swagger 说明和代理提示词。真实验收另存新的 `validation-YYYY-MM-DD-*.md`，不覆盖旧记录。已完成的临时计划通过 Git 历史追溯，不继续作为现行交接指令。
+
+- [平台运行契约](asr-platform-runtime.md)
+- [平台实现验收](validation-2026-10-25-platform.md)
+- [日志与诊断](asr-diagnostics.md)
+- [新增 ASR 引擎](adding-asr-engine.md)
+- [测试精简去向](asr-platform-test-map.md)

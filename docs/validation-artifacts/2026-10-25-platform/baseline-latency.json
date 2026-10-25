@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "source_label": "baseline-source",
+  "python": "3.12.10",
+  "platform": "Darwin",
+  "architecture": "arm64",
+  "scope": "in-process ASGI CPU/I/O with delayed mock inference; no network, GPU or quality measurement",
+  "warmup": "one health and one list request per client before the measured window",
+  "polling_latency_ms": "elapsed ASGI request time; scheduling lateness and 20ms loop lag recorded separately",
+  "rounds": [
+    {
+      "round": 0,
+      "records": 1000,
+      "clients": 10,
+      "poll_interval_seconds": 3.5,
+      "polls_per_client": 3,
+      "list_protocol": "legacy all rows",
+      "measured_wall_ms": 7239.143709011842,
+      "round_wall_ms": 8363.145917013753,
+      "health": {
+        "count": 30,
+        "p95_ms": 1.7858330102171749,
+        "median_ms": 0.424020501668565,
+        "min_ms": 0.130290980450809,
+        "max_ms": 2.1310840093065053
+      },
+      "jobs": {
+        "count": 30,
+        "p95_ms": 194.27662499947473,
+        "median_ms": 124.92754201230127,
+        "min_ms": 23.106458014808595,
+        "max_ms": 206.51520899264142
+      },
+      "response_bytes": {
+        "health": 3840,
+        "jobs": 10170300
+      },
+      "loop_lag": {
+        "count": 309,
+        "p95_ms": 2.1619579929392785,
+        "median_ms": 2.065958018647507,
+        "min_ms": 0.05845900159329176,
+        "max_ms": 186.65625000721775
+      },
+      "schedule_lateness": {
+        "count": 30,
+        "p95_ms": 14.223917009076104,
+        "median_ms": 6.937854501302354,
+        "min_ms": 1.107166986912489,
+        "max_ms": 14.864291995763779
+      },
+      "uploads": [
+        {
+          "bytes": 1920044,
+          "duration_ms": 1086.5135829953942
+        },
+        {
+          "bytes": 1920044,
+          "duration_ms": 1094.0470409987029
+        }
+      ],
+      "mock_inference_delay_seconds": 8,
+      "inference_observed_transcribing": true,
+      "mock_terminal_status": "completed"
+    },
+    {
+      "round": 1,
+      "records": 1000,
+      "clients": 10,
+      "poll_interval_seconds": 3.5,
+      "polls_per_client": 3,
+      "list_protocol": "legacy all rows",
+      "measured_wall_ms": 7221.352374996059,
+      "round_wall_ms": 8289.890417014249,
+      "health": {
+        "count": 30,
+        "p95_ms": 2.2575000184588134,
+        "median_ms": 0.3668120043585077,
+        "min_ms": 0.12954100384376943,
+        "max_ms": 2.522708004107699
+      },
+      "jobs": {
+        "count": 30,
+        "p95_ms": 189.4242089765612,
+        "median_ms": 122.12481249298435,
+        "min_ms": 23.38383300229907,
+        "max_ms": 207.39150000736117
+      },
+      "response_bytes": {
+        "health": 3840,
+        "jobs": 10170300
+      },
+      "loop_lag": {
+        "count": 310,
+        "p95_ms": 2.19762502820231,
+        "median_ms": 2.064208500087261,
+        "min_ms": 0.08800000068731606,
+        "max_ms": 179.5977920119185
+      },
+      "schedule_lateness": {
+        "count": 30,
+        "p95_ms": 14.87412498681806,
+        "median_ms": 7.302582991542295,
+        "min_ms": 0.9533749835100025,
+        "max_ms": 15.687665989389643
+      },
+      "uploads": [
+        {
+          "bytes": 1920044,
+          "duration_ms": 1089.2197089851834
+        },
+        {
+          "bytes": 1920044,
+          "duration_ms": 1097.5812090036925
+        }
+      ],
+      "mock_inference_delay_seconds": 8,
+      "inference_observed_transcribing": true,
+      "mock_terminal_status": "completed"
+    },
+    {
+      "round": 2,
+      "records": 1000,
+      "clients": 10,
+      "poll_interval_seconds": 3.5,
+      "polls_per_client": 3,
+      "list_protocol": "legacy all rows",
+      "measured_wall_ms": 7226.819124975009,
+      "round_wall_ms": 8276.446375006344,
+      "health": {
+        "count": 30,
+        "p95_ms": 0.4174160130787641,
+        "median_ms": 0.16116649203468114,
+        "min_ms": 0.1404999929945916,
+        "max_ms": 0.5590000073425472
+      },
+      "jobs": {
+        "count": 30,
+        "p95_ms": 189.89912499091588,
+        "median_ms": 105.04547899472527,
+        "min_ms": 23.081666993675753,
+        "max_ms": 202.29854198987596
+      },
+      "response_bytes": {
+        "health": 3840,
+        "jobs": 10170300
+      },
+      "loop_lag": {
+        "count": 306,
+        "p95_ms": 2.112167014274746,
+        "median_ms": 2.03127101121936,
+        "min_ms": 0.05162501474842429,
+        "max_ms": 192.7938339940738
+      },
+      "schedule_lateness": {
+        "count": 30,
+        "p95_ms": 5.277374992147088,
+        "median_ms": 3.0435834923991933,
+        "min_ms": 0.9920419834088534,
+        "max_ms": 5.5944169871509075
+      },
+      "uploads": [
+        {
+          "bytes": 1920044,
+          "duration_ms": 1098.1993750028778
+        },
+        {
+          "bytes": 1920044,
+          "duration_ms": 1105.4977499879897
+        }
+      ],
+      "mock_inference_delay_seconds": 8,
+      "inference_observed_transcribing": true,
+      "mock_terminal_status": "completed"
+    }
+  ]
+}

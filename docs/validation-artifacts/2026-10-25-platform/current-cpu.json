@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "source_label": "asr_Server",
+  "python": "3.12.10",
+  "machine": {
+    "os": "Darwin",
+    "release": "27.0.0",
+    "architecture": "arm64",
+    "cpu_count": 10
+  },
+  "repeats": 3,
+  "scope": "synthetic CPU/I/O only; no GPU, no quality measurement",
+  "query_semantics": "baseline returns all rows; current returns one summary page of 50; these are different protocols",
+  "query": [
+    {
+      "records": 100,
+      "synthetic_text_bytes_per_record": 16384,
+      "query": "stored summary, page size 50",
+      "rows_returned": 50,
+      "response_bytes": 24927,
+      "cache": "warm after one unmeasured query",
+      "samples_ms": [
+        1.1037920194212347,
+        1.0422500199638307,
+        1.0252089996356517
+      ],
+      "median_ms": 1.0422500199638307,
+      "min_ms": 1.0252089996356517,
+      "max_ms": 1.1037920194212347
+    },
+    {
+      "records": 1000,
+      "synthetic_text_bytes_per_record": 16384,
+      "query": "stored summary, page size 50",
+      "rows_returned": 50,
+      "response_bytes": 24928,
+      "cache": "warm after one unmeasured query",
+      "samples_ms": [
+        1.3454160070978105,
+        1.2803330027963966,
+        1.1449159937910736
+      ],
+      "median_ms": 1.2803330027963966,
+      "min_ms": 1.1449159937910736,
+      "max_ms": 1.3454160070978105
+    },
+    {
+      "records": 10000,
+      "synthetic_text_bytes_per_record": 16384,
+      "query": "stored summary, page size 50",
+      "rows_returned": 50,
+      "response_bytes": 24929,
+      "cache": "warm after one unmeasured query",
+      "samples_ms": [
+        1.1689169914461672,
+        1.0995420161634684,
+        1.028333994327113
+      ],
+      "median_ms": 1.0995420161634684,
+      "min_ms": 1.028333994327113,
+      "max_ms": 1.1689169914461672
+    }
+  ],
+  "ffmpeg": "ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "decode": [
+    {
+      "audio_seconds": 30,
+      "input_sample_rate": 44100,
+      "input_channels": 2,
+      "source_sha256": "0be434e24982d2083653efece612e53a86f45bcb26195e1977c99929bd473dd2",
+      "sample_rate": 16000,
+      "channels": 1,
+      "frames": 480000,
+      "output_bytes": 960044,
+      "pcm_sha256": "7658b991fefac7e87892a30b82f64f7d015d24b4e7bc894023f9b06eb10f2459",
+      "cache": "warm after one unmeasured decode",
+      "samples_ms": [
+        53.792166989296675,
+        49.19629101641476,
+        53.967790998285636
+      ],
+      "median_ms": 53.792166989296675,
+      "min_ms": 49.19629101641476,
+      "max_ms": 53.967790998285636
+    },
+    {
+      "audio_seconds": 180,
+      "input_sample_rate": 44100,
+      "input_channels": 2,
+      "source_sha256": "22137e2a54db04b1548377b3e19fef527a70a7c2a30ccc366e78432b9d2f95c5",
+      "sample_rate": 16000,
+      "channels": 1,
+      "frames": 2880000,
+      "output_bytes": 5760044,
+      "pcm_sha256": "e36d425eb762623a1fdaf055b6d085f99ec05b0bd3af9d9f7127a3d2e803cd46",
+      "cache": "warm after one unmeasured decode",
+      "samples_ms": [
+        301.4318330097012,
+        103.72100002132356,
+        102.54012499353848
+      ],
+      "median_ms": 103.72100002132356,
+      "min_ms": 102.54012499353848,
+      "max_ms": 301.4318330097012
+    }
+  ],
+  "logs": {
+    "available": true,
+    "event_count": 10000,
+    "queue_capacity": 4096,
+    "workload": "event-only saturated producer microbenchmark; not transcription wall-clock overhead",
+    "modes": {
+      "CRITICAL": {
+        "samples_ms": [
+          0.8072919736150652,
+          0.7523749954998493,
+          0.816916988696903
+        ],
+        "median_ms": 0.8072919736150652,
+        "min_ms": 0.7523749954998493,
+        "max_ms": 0.816916988696903,
+        "emit_and_flush_ms": [
+          0.8503329881932586,
+          0.778207991970703,
+          0.8401669911108911
+        ],
+        "dropped_count": [
+          0,
+          0,
+          0
+        ]
+      },
+      "INFO": {
+        "samples_ms": [
+          69.85262499074452,
+          65.62775000929832,
+          66.23424999997951
+        ],
+        "median_ms": 66.23424999997951,
+        "min_ms": 65.62775000929832,
+        "max_ms": 69.85262499074452,
+        "emit_and_flush_ms": [
+          102.77941700769588,
+          98.99362499709241,
+          97.95591697911732
+        ],
+        "dropped_count": [
+          6025,
+          6024,
+          6023
+        ]
+      }
+    },
+    "producer_overhead_percent": 8104.4975256451,
+    "extra_microseconds_per_event": 6.542695802636445
+  }
+}

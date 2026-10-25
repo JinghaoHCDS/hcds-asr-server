@@ -92,3 +92,44 @@ async def test_cancelled_cleanup_waits_for_deletion_and_shared_budget_release(
     finally:
         allow_deletion.set()
         await asyncio.gather(first, *([second] if second is not None else []), return_exceptions=True)
+
+
+async def test_resource_lease_growth_counts_both_copies_and_releases_once_after_directory_removal(tmp_path: Path) -> None:
+    manager = WorkspaceManager(Settings(max_spool_mb=1, min_free_disk_mb=0))
+    root = tmp_path / "media"
+    root.mkdir()
+    parser = await manager.reserve_resource(512 * 1024, root)
+    await parser.materialize(512 * 1024)
+    workspace = await manager.reserve_resource(512 * 1024, root)
+    assert manager._reserved_upload_bytes == 1024 * 1024
+    with pytest.raises(AsrError) as error:
+        await workspace.grow(1)
+    assert error.value.code == "job_queue_full"
+    assert manager._reserved_upload_bytes == 1024 * 1024
+    root.rmdir()
+    await parser.release()
+    await workspace.release()
+    await parser.release()
+    assert manager._reserved_upload_bytes == 0
+    assert not any(manager._pending_disk_bytes.values())
+
+
+async def test_decode_materializes_lease_incrementally_and_returns_unused_reservation(tmp_path: Path) -> None:
+    from asr_server.audio.preprocess import normalize_audio_path_to_wav_async
+    from tests.helpers import make_wav
+
+    manager = WorkspaceManager(Settings(min_free_disk_mb=0, max_spool_mb=1))
+    source, output = tmp_path / "source.wav", tmp_path / "normalized.wav"
+    source.write_bytes(make_wav(0.1))
+    lease = await manager.reserve_resource(1024 * 1024, tmp_path)
+    result = await normalize_audio_path_to_wav_async(source, output, max_output_bytes=1024 * 1024,
+                                                    resource_lease=lease)
+    actual = result.path.stat().st_size
+    assert lease.pending_bytes == 1024 * 1024 - actual
+    assert manager._pending_disk_bytes[tmp_path.stat().st_dev] == lease.pending_bytes
+    await lease.release_unused()
+    assert lease.size_bytes == actual
+    assert lease.pending_bytes == 0
+    assert manager._reserved_upload_bytes == actual
+    await lease.release()
+    assert manager._reserved_upload_bytes == 0

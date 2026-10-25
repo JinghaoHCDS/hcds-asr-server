@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
 from dataclasses import asdict, replace
 from pathlib import Path
 from time import perf_counter
@@ -11,7 +12,10 @@ from uuid import uuid4
 from asr_server.adapters.base import AudioPath, TimestampItem, TranscriptionResult, TranscriptionTimings
 from asr_server.adapters.qwen import ALIGNER_REVISION
 from asr_server.audio.metadata import inspect_audio_path
-from asr_server.audio.preprocess import normalize_audio_path_to_wav_async
+from asr_server.audio.preprocess import NormalizedAudioPath, normalize_audio_path_to_wav_async
+from asr_server.audio.assets import NORMALIZATION_VERSION, NormalizedAudioAsset
+from asr_server.audio.workspace import AudioWorkspace
+from asr_server.observability import current_context, emit
 from asr_server.audio.timing import timing_analysis
 from asr_server.errors import AsrError
 from asr_server.quality import PROFILE_VERSION
@@ -126,16 +130,37 @@ async def run_quality_transcription(
     before_chunk: BeforeChunkCallback | None,
     after_chunk: AfterChunkCallback | None,
     checkpoint_dir: Path | None,
+    normalized_asset: NormalizedAudioAsset | None = None,
+    cancel_event: threading.Event | None = None,
+    owner_workspace: AudioWorkspace | None = None,
 ) -> dict[str, object]:
     started = perf_counter()
     if stage_callback:
         await stage_callback("preprocessing", {})
-    normalized = await normalize_audio_path_to_wav_async(upload_path, workspace / "normalized.wav", timeout_seconds=settings.ffmpeg_timeout_seconds)
+    cancel_event = cancel_event or current_context().cancel_event
+    if normalized_asset is not None:
+        await asyncio.to_thread(normalized_asset.validate, spec=manager.runtime_for(checked.selected_model).definition.audio_spec)
+        normalized = NormalizedAudioPath(normalized_asset.path, 0.0, normalized_asset)
+        emit("media.reused", output_bytes=normalized_asset.size_bytes)
+    else:
+        from asr_server.audio.workspace import remaining_workspace_output_bytes
+        budget_bytes = await asyncio.to_thread(remaining_workspace_output_bytes, workspace, settings,
+            exclude=(checkpoint_dir,) if checkpoint_dir else (), output_path=workspace / "normalized.wav")
+        lease = None
+        if owner_workspace is not None:
+            spec = manager.runtime_for(checked.selected_model).definition.audio_spec
+            budget_bytes = min(budget_bytes, int(21600 * spec.bytes_per_second) + 44)
+            lease = await owner_workspace._manager.reserve_resource(budget_bytes, workspace)
+            owner_workspace.resource_leases.append(lease)
+        normalized = await normalize_audio_path_to_wav_async(upload_path, workspace / "normalized.wav",
+            timeout_seconds=settings.ffmpeg_timeout_seconds, max_output_bytes=budget_bytes, cancel_event=cancel_event, resource_lease=lease)
+        if lease is not None:
+            await lease.release_unused()
     if stage_callback:
         await stage_callback("splitting", {})
-    target = request.quality_chunk_seconds or 60.0
-    padding = request.overlap_seconds or 0.0
-    chunks, duration = await asyncio.to_thread(plan_quality_chunks, normalized.path, target, padding)
+    target = request.quality_chunk_seconds if request.quality_chunk_seconds is not None else 60.0
+    padding = request.overlap_seconds if request.overlap_seconds is not None else 0.0
+    chunks, duration = await asyncio.to_thread(plan_quality_chunks, normalized.path, target, padding, cancel_event=cancel_event)
     model_revision = manager.runtime_for(checked.selected_model).definition.revision
     prompt, glossary_report = glossary_context(request.context, request.hotwords, request.glossary_snapshot)
     context_report = glossary_report.pop("context")
@@ -144,6 +169,8 @@ async def run_quality_transcription(
     speech_detector = await asyncio.to_thread(detector_identity)
     identity = await asyncio.to_thread(fingerprint, {
         "audio": await asyncio.to_thread(file_digest, normalized.path), "profile": PROFILE_VERSION,
+        "execution_identity": manager.runtime_for(checked.selected_model).definition.identity(),
+        "normalization_version": NORMALIZATION_VERSION,
         "model": checked.selected_model, "revision": model_revision, "aligner_revision": ALIGNER_REVISION, "request": request_identity,
         "chunks": [asdict(chunk) for chunk in chunks],
         "speech_detector": speech_detector,
@@ -160,6 +187,9 @@ async def run_quality_transcription(
         await stage_callback("loading_model", {"total_chunks": len(chunks), "completed_chunks": 0, "chunk_windows": [(chunk.start, chunk.end) for chunk in chunks], "split": {"strategy": "quality_low_energy", "chunk_count": len(chunks), "soft_chunk_seconds": target, "hard_chunk_seconds": 180, "overlap_seconds": padding}})
 
     async def recognize(start: float, end: float) -> TranscriptionResult:
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        emit("chunk.started", start_s=start, end_s=end)
         try:
             _backend, items, _timings = await manager.transcribe_chunks(
                 [AudioPath(normalized.path, start, end)], model_id=checked.selected_model,
@@ -190,6 +220,7 @@ async def run_quality_transcription(
         if stage_callback:
             await stage_callback("transcribing", {"total_chunks": len(chunks), "completed_chunks": index, "current_chunk": index + 1, "current_chunk_start": chunk.start, "current_chunk_end": chunk.end})
         cached = await asyncio.to_thread(checkpoints.load, index)
+        emit("quality.checkpoint_hit" if cached is not None else "quality.checkpoint_miss", chunk_index=index)
         if cached is not None:
             result, cached_reviews, cached_extra = cached
             chunk_reviews = cached_reviews
@@ -217,6 +248,7 @@ async def run_quality_transcription(
                     await before_chunk(index, len(chunks))
                 await asyncio.to_thread(checkpoints.reserve_review, chunk.duration, budget, review_key)
                 extra_seconds = checkpoints.extra_seconds
+                emit("quality.review", chunk_index=chunk.index, review_budget_seconds=budget, reason="shorter_windows", attempt=attempt)
                 chunk_extra += chunk.duration
                 # Shorter re-segmentation changes acoustic boundaries rather
                 # than repeating an identical deterministic generation call.
@@ -269,6 +301,7 @@ async def run_quality_transcription(
                 stop_reason = "review_attempt_limit" if checkpoints.review_attempts.get(review_key, 0) >= 2 else "review_audio_budget"
                 raise AsrError(422, "quality_incomplete", "audio interval remains unresolved after bounded automatic review", {"start": chunk.start, "end": chunk.end, "chunk_index": index, "cause": initial_error.code if initial_error else causes[0], "stop_reason": stop_reason, "partial_text": "\n\n".join(item.text for item in results), "review_audio_seconds": extra_seconds, "review_budget_seconds": budget})
             await asyncio.to_thread(checkpoints.save, index, result, chunk_reviews, chunk_extra)
+            emit("chunk.completed", chunk_index=index, start_s=chunk.start, end_s=chunk.end)
         for record in chunk_reviews:
             evidence = record.get("evidence")
             if record.get("method") == "empty_audio" and isinstance(evidence, dict):
@@ -306,6 +339,7 @@ async def run_quality_transcription(
             if extra_seconds + review_end - start <= budget and checkpoints.review_attempts.get(gap_key, 0) < 2:
                 if before_chunk:
                     await before_chunk(chunk.index, len(chunks))
+                emit("quality.review", chunk_index=chunk.index, reason="acoustic_gap", review_budget_seconds=budget)
                 await asyncio.to_thread(checkpoints.reserve_review, review_end - start, budget, gap_key)
                 extra_seconds = checkpoints.extra_seconds
                 try:
@@ -338,6 +372,7 @@ async def run_quality_transcription(
                 break
             if before_chunk:
                 await before_chunk(index, len(chunks))
+            emit("quality.review", chunk_index=index, reason="boundary", review_budget_seconds=budget, attempt=attempt)
             await asyncio.to_thread(checkpoints.reserve_review, end - start, budget, boundary_key)
             extra_seconds = checkpoints.extra_seconds
             try:

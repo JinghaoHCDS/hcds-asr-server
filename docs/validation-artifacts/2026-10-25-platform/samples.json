@@ -1,0 +1,34 @@
+{
+  "fixtures": [
+    {
+      "size_bytes": 960078,
+      "duration_seconds": 30.0,
+      "start_seconds": 120,
+      "name": "dev-30s.wav",
+      "split": "development",
+      "sha256": "20d10bf5167122c5b271b3eecedcde61cd33f4914872a81e5ca9b85e0389cdd0",
+      "source": "20261018_gBUPjeslIA0.mp4"
+    },
+    {
+      "size_bytes": 5760078,
+      "duration_seconds": 180.0,
+      "start_seconds": 600,
+      "name": "acceptance-180s.wav",
+      "split": "acceptance",
+      "sha256": "eec75ced0728ecc5de5dd58da73943005be26f5d01e4d9ebc5add0122fac2c42",
+      "source": "20261011_KkVMTnt5yKA.mp4"
+    },
+    {
+      "size_bytes": 19200078,
+      "duration_seconds": 600.0,
+      "start_seconds": 120,
+      "name": "acceptance-600s.wav",
+      "split": "acceptance-long",
+      "sha256": "ad6ee4ee84c954f95f7038828127f48ff0c43717669732a18a069db8f35db18d",
+      "source": "20261004_-hiEPlFNl1M.mp4"
+    }
+  ],
+  "ffmpeg": "ffmpeg version 8.0.1-essentials_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers",
+  "windows_media_files_observed": 88,
+  "scope": "Three distinct source episodes; Windows extraction and verified transfer to isolated WSL validation. No human reference transcript."
+}

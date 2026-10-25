@@ -1,0 +1,3158 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-25",
+  "scope": "isolated WSL, installed offline real adapters; no deployment or new dependencies",
+  "baseline_commit": "2fb6a4dca0375ad2cbc3a20b2e3aa5b4b71cf852",
+  "initial_source_archive_sha256": "8d68a6dc8ebee5afb04783d0e511a889a1cb6c506c7a9da71a3e70f4eb7578a8",
+  "tested_source_identity": {
+    "asr_server/__init__.py": "a7833154ef22876fa19e1ec8355064aea30a04319390cb28d4b11b33a9b1de38",
+    "asr_server/adapters/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "asr_server/adapters/base.py": "308f72f7f74d680b68e9c731a24b725de6b9cf72fdce14fcf22664df9acaae14",
+    "asr_server/adapters/mock.py": "54b2a58ef807cc998b7965de219780a5ac72ccc1cbc030914d70596125fcb422",
+    "asr_server/adapters/moss.py": "41b72977b5e684a6d670b7311efa58afafbe05209367a2e848cc46cb050a5110",
+    "asr_server/adapters/qwen.py": "2b60edcd3ed4cd449f44492464d128a31fd47184fcea8e16b12eaf1c1dce47bc",
+    "asr_server/admission.py": "0f794261d9a8eabfee7b5d384d57eb80a4ac02fe62e7095a603f81ea769975fb",
+    "asr_server/api/__init__.py": "023a825e03ec4ca1477a806020d8cae21797d6c6cc396f4a1bc8b49e83e39a26",
+    "asr_server/api/schemas.py": "69f82b3e482bf9619f97fa3075c3f7e7750c490248f1eb12988818eda4685640",
+    "asr_server/audio/__init__.py": "3c78788ea0fb8b468bf16f215d385ccca713e31b0d6625da9c1c4e1f920e5b92",
+    "asr_server/audio/assets.py": "84ddd57027ddce028c9b9381a1b539aa967bc54169326474438640bd02fe6817",
+    "asr_server/audio/merger.py": "d5536be6734066f1185301e3570d6e8656d626604028feed3a37841981c55838",
+    "asr_server/audio/metadata.py": "bbdd82b49364ef9ac296b0a3da3f7d7357ad015b6baa99e9779204084528809c",
+    "asr_server/audio/preprocess.py": "7ba78b2871b5fcbe98a1ca7ec7e078604af5a8978dec784a784940665979ba74",
+    "asr_server/audio/splitter.py": "98583b79961bd1480201b86cc648caaa08a8c479fa06f096c272af04919008c4",
+    "asr_server/audio/subtitles.py": "94399a2e62c21433890deb341082df7a8572becd8b5661133bfcded0ec8c8a4b",
+    "asr_server/audio/timing.py": "5d4feb5cf0e9b3152214f2ef74fe40b2d2fbc44e3bb7ff8a8ad65fcf4e6da635",
+    "asr_server/audio/transcript.py": "1dd25468730ce5f4a787780b4a53c6341e19be4149f6ca486e97f41ac03ef78f",
+    "asr_server/audio/workspace.py": "ce125de62ec333a8b91c487aca647864851bb2628eba9b78a4b0b7560046f344",
+    "asr_server/auth.py": "8534d57667f9401ed050d835ea7187991e129153f7631c7273c1e6441b40f491",
+    "asr_server/config.py": "7583d586db69b217907d69b9f5159aae98971b30af98cd6e52e45c9a37f2b24f",
+    "asr_server/context.py": "41874c0780dc56af3f4e1f9175116f8ae849c5a499134fc3d99c5a5ddbaf253c",
+    "asr_server/diarization/__init__.py": "26b0a2da0aa1083c0af85c373381a14ba05733103f0a1afc7f4af64db4ac05a2",
+    "asr_server/diarization/anchor_replay.py": "b9b7df7398c73c047e27ac87ad96fad8ac63eabe6d366fc9073342861444c87e",
+    "asr_server/engines.py": "dd84860d0d9a5cac707390d2c70dfa50466bdf7da30083a227b1e889ddd2357c",
+    "asr_server/errors.py": "8f26e2403df759feae45df7d5db5aaf9a655d582ed9161d0d806e5caa1668b35",
+    "asr_server/execution.py": "a06580dd5bf9f91fbffce92eaad613e52c93b237e8833486bc766045a6df8e64",
+    "asr_server/jobs.py": "a53f9af815c4992eaf7191765e142ff8fbe182495cf35c19e2a9e5f7ea38aef3",
+    "asr_server/lifecycle.py": "685eecb0f1287185a9a4ca9cdaa039208a69674491aba2528c6a413ea9bc32ed",
+    "asr_server/main.py": "94769f204fbb9ddd2ed18f9ec28dc037f63b32fcd5d9578683b3923322834e76",
+    "asr_server/observability.py": "dde02863e7241d42f98006d06c1ebe910d8c9ffa68f1407c27bb2d2442f2b946",
+    "asr_server/quality/__init__.py": "28de621e12175645d67e216f9ffa05d730cff42b441111813b3d8a47501097fc",
+    "asr_server/quality/checkpoints.py": "712c85d07197f7d77049aa92385717720edac4fef7faeab24f178157f9aca6e0",
+    "asr_server/quality/glossary.py": "76672364292a842fe47f6e5eef580de6a6000bfea32a1a2a807bd75d3c1e8faa",
+    "asr_server/quality/pipeline.py": "43dbafc690608479b622dbfc765909ccc124769063b0dcce472e39ebaeb42c0d",
+    "asr_server/quality/segments.py": "6f4b98c150aaa0a6f5c84a23a36a473d75b16a74698707465e33f614da689dd6",
+    "asr_server/quality/speech_evidence.py": "8ebdf7c36d3870218e9b6418d1b0c4cbcb96430578d17993046b260cb83de563",
+    "asr_server/quality/splitter.py": "3f74f4eca9951150a0cd0d86bd66b52b82be76fab583b21a3be229b46dd37c98",
+    "asr_server/registry.py": "3d4120073a4ad27387e0c1d5260d1e3a1caa385a37eb159c0b3336178175eb0e",
+    "asr_server/scheduler.py": "f2188f5a0b6edec34d48624363d4051fd5712ee016c6a3718f1f173dc5f70bf5",
+    "asr_server/transcription.py": "7468da8944f55a5742874fbfade98454dca7ece09e36d03bb8509c32f4ea1290",
+    "asr_server/workbench/__init__.py": "995a24220a1ac4d1f0358d24ca1d0364f3c34b82012b6c0cc611e4dc9d8d8452",
+    "asr_server/workbench/executor.py": "306a0b496d6010569390b96be3f7d953547e7a1c42290d55f3a55a3a3e23262a",
+    "asr_server/workbench/router.py": "d639e9652dc481feddaf4fb4c7dce966f8b5fa4519e08897543eb26907678899",
+    "asr_server/workbench/security.py": "4ef83c3a416f82720e105dedf24876d2d2f70fe06f65bcf00d4b5a9b88daebd1",
+    "asr_server/workbench/service.py": "f6a3187f3298173b0d86a237082467a7cf6493a523e2344290c9009e8316e47e",
+    "asr_server/workbench/store.py": "974d8e329331d3ac0748c43382f9d80b136b0ae04e6daca54239df07682b0d0a",
+    "asr_server/workers/__init__.py": "969c7beceb9e75f636f4003be37edf409015dfddfbe4e9f935a1ea2e2ff8504f",
+    "asr_server/workers/audio.py": "b0af9405694a93aa7648dc527f0ed595fa66f004e243f5d046960466c6fcec90",
+    "asr_server/workers/codec.py": "c744438ccdc721b124e466020b7a66ce839e6ce7d40bc62c5ebcd3064345063c",
+    "asr_server/workers/transport.py": "afc6fcfbc659b906a19e8a018de8d767a7af499a48a5e68652cdc8d35fd38f11",
+    "scripts/platform_gpu_validation.py": "7c8fcbba6742afdec8c9b6a2177cfea0f4eda2a9c4fd8fb12e3acf4099341771",
+    "scripts/platform_gpu_compare.py": "87bcfd543e6275820945594d434a369d39279bd8202297bbb4db56671acb740b",
+    "scripts/platform_prefetch_probe.py": "2230c9bc6216cd12fbb2fbac0b77e826b4acd17e589941abab5502b091ac4539",
+    "scripts/qwen_forced_alignment_smoke.py": "98d64ee10670cbfe44a215a3492a56b96cbcca56d3eaa7dfbf8d9cfb3de4d326"
+  },
+  "runtime_source_sha256": "9589bb46bc4bf07ea14a4d985639228434c3f37a9ae93b7e18a21afb2ca9836e",
+  "local_runtime_code_matches_tested_files": true,
+  "accuracy_accepted": false,
+  "six_hour_real_speech_accepted": false,
+  "environment": {
+    "python": "3.12.13",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+    "torch": "2.11.0+cu128",
+    "torch_cuda": "12.8",
+    "cuda_available": true,
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "capability": [
+      12,
+      0
+    ],
+    "cuda_tensor_smoke": true,
+    "transformers": "5.18.0.dev0",
+    "huggingface-hub": "1.32.0",
+    "fastapi": "0.138.1",
+    "starlette": "1.3.1",
+    "cached_models": [
+      {
+        "repo": "Qwen/Qwen3-ASR-0.6B-hf",
+        "revision": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
+        "available": true,
+        "files": 7
+      },
+      {
+        "repo": "Qwen/Qwen3-ASR-1.7B-hf",
+        "revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "available": true,
+        "files": 7
+      },
+      {
+        "repo": "Qwen/Qwen3-ForcedAligner-0.6B-hf",
+        "revision": "c07281df297b9905d24a508279258cccf987a064",
+        "available": true,
+        "files": 6
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Transcribe-Diarize",
+        "revision": "d7231bbae2587a4af278735eb765b318c4f64edd",
+        "available": true,
+        "files": 16
+      }
+    ]
+  },
+  "phases": [
+    {
+      "scenario": "legacy",
+      "run_id": "run-20261025T010657Z-b9ba0222",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "legacy",
+          "status": "passed",
+          "elapsed_seconds": 30.25153347000014,
+          "result": {
+            "model": "qwen3-asr-0.6b",
+            "language": "zh",
+            "sync_chars": 131,
+            "async_chars": 131,
+            "states": [
+              "queued",
+              "transcribing",
+              "completed"
+            ],
+            "unload": {
+              "model": "qwen3-asr-0.6b",
+              "before_pid": 2462,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "qwen3-asr-0.6b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            }
+          }
+        }
+      ],
+      "shutdown_snapshots": [
+        {
+          "point": "after_app_shutdown",
+          "phase": "legacy",
+          "models": [
+            {
+              "id": "qwen3-asr-1.7b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "qwen3-asr-0.6b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "moss-transcribe-diarize-0.9b",
+              "engine_id": "moss",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            }
+          ],
+          "reserved_temporary_bytes": 0,
+          "scheduled_operations": 0,
+          "gpu_lock_held": false,
+          "owned_child_pids": []
+        }
+      ]
+    },
+    {
+      "scenario": "lifecycle",
+      "run_id": "run-20261025T012022Z-c3544291",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "lifecycle",
+          "status": "passed",
+          "elapsed_seconds": 21.384232534001058,
+          "result": {
+            "models": [
+              {
+                "model": "qwen3-asr-0.6b",
+                "automatically_evicted": null
+              },
+              {
+                "model": "qwen3-asr-1.7b",
+                "automatically_evicted": {
+                  "model": "qwen3-asr-0.6b",
+                  "before_pid": 4375,
+                  "after_pid": null,
+                  "status": "unloaded",
+                  "worker_reaped": true
+                }
+              },
+              {
+                "model": "moss-transcribe-diarize-0.9b",
+                "automatically_evicted": {
+                  "model": "qwen3-asr-1.7b",
+                  "before_pid": 4440,
+                  "after_pid": null,
+                  "status": "unloaded",
+                  "worker_reaped": true
+                }
+              }
+            ],
+            "automatic_switch_count": 2,
+            "intermediate_manual_unloads": 0,
+            "final_unload": {
+              "model": "moss-transcribe-diarize-0.9b",
+              "before_pid": 4511,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "moss-transcribe-diarize-0.9b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            }
+          }
+        }
+      ],
+      "shutdown_snapshots": [
+        {
+          "point": "after_app_shutdown",
+          "phase": "lifecycle",
+          "models": [
+            {
+              "id": "qwen3-asr-1.7b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "qwen3-asr-0.6b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "moss-transcribe-diarize-0.9b",
+              "engine_id": "moss",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            }
+          ],
+          "reserved_temporary_bytes": 0,
+          "scheduled_operations": 0,
+          "gpu_lock_held": false,
+          "owned_child_pids": []
+        }
+      ]
+    },
+    {
+      "scenario": "moss-180s",
+      "run_id": "run-20261025T011131Z-2c9ded64",
+      "status": "failed",
+      "phases": [
+        {
+          "phase": "moss",
+          "status": "failed",
+          "elapsed_seconds": 54.74984940000286,
+          "error_type": "ValidationFailure",
+          "error_code": "job_failed"
+        }
+      ],
+      "shutdown_snapshots": []
+    },
+    {
+      "scenario": "moss-180s-explicit8192",
+      "run_id": "run-20261025T011523Z-7a343562",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "moss",
+          "status": "passed",
+          "elapsed_seconds": 65.35358508100035,
+          "result": {
+            "model": "moss-transcribe-diarize-0.9b",
+            "states": [
+              "preprocessing",
+              "loading_model",
+              "transcribing",
+              "completed"
+            ],
+            "text_chars": 1109,
+            "segments": 108,
+            "speaker_scope": "global",
+            "execution": {
+              "mode": "native_long_form",
+              "requested_split_strategy": "auto",
+              "resolved_split_strategy": "none",
+              "speaker_scope": "global",
+              "automatic_chunk_fallback": false
+            },
+            "generation": {
+              "prompt_tokens": 2424,
+              "generated_tokens": 2480,
+              "max_new_tokens": 8192,
+              "peak_vram_allocated_mb": 2300.5712890625,
+              "segment_coverage_end_seconds": 180.0,
+              "segment_coverage_ratio": 1.0,
+              "audible_speech_end_seconds": 180.0,
+              "uncovered_speech_intervals": 0,
+              "coverage_is_not_accuracy": true,
+              "invocation_count": 1,
+              "truncated": false,
+              "finish_reasons": []
+            },
+            "requested_max_new_tokens": 8192,
+            "unload": {
+              "model": "moss-transcribe-diarize-0.9b",
+              "before_pid": 3537,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "moss-transcribe-diarize-0.9b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            }
+          }
+        }
+      ],
+      "shutdown_snapshots": [
+        {
+          "point": "after_app_shutdown",
+          "phase": "moss",
+          "models": [
+            {
+              "id": "qwen3-asr-1.7b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "qwen3-asr-0.6b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "moss-transcribe-diarize-0.9b",
+              "engine_id": "moss",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            }
+          ],
+          "reserved_temporary_bytes": 0,
+          "scheduled_operations": 0,
+          "gpu_lock_held": false,
+          "owned_child_pids": []
+        }
+      ]
+    },
+    {
+      "scenario": "moss-native-rss",
+      "run_id": "run-20261025T012727Z-48a407ab",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "moss",
+          "status": "passed",
+          "elapsed_seconds": 62.54004117900331,
+          "result": {
+            "model": "moss-transcribe-diarize-0.9b",
+            "states": [
+              "preprocessing",
+              "loading_model",
+              "transcribing",
+              "completed"
+            ],
+            "text_chars": 1109,
+            "segments": 108,
+            "speaker_scope": "global",
+            "execution": {
+              "mode": "native_long_form",
+              "requested_split_strategy": "auto",
+              "resolved_split_strategy": "none",
+              "speaker_scope": "global",
+              "automatic_chunk_fallback": false
+            },
+            "generation": {
+              "prompt_tokens": 2424,
+              "generated_tokens": 2480,
+              "max_new_tokens": 8192,
+              "peak_vram_allocated_mb": 2300.5712890625,
+              "segment_coverage_end_seconds": 180.0,
+              "segment_coverage_ratio": 1.0,
+              "audible_speech_end_seconds": 180.0,
+              "uncovered_speech_intervals": 0,
+              "coverage_is_not_accuracy": true,
+              "invocation_count": 1,
+              "truncated": false,
+              "finish_reasons": []
+            },
+            "requested_max_new_tokens": 8192,
+            "unload": {
+              "model": "moss-transcribe-diarize-0.9b",
+              "before_pid": 7072,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "moss-transcribe-diarize-0.9b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            }
+          }
+        }
+      ],
+      "shutdown_snapshots": [
+        {
+          "point": "after_app_shutdown",
+          "phase": "moss",
+          "models": [
+            {
+              "id": "qwen3-asr-1.7b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "qwen3-asr-0.6b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "moss-transcribe-diarize-0.9b",
+              "engine_id": "moss",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            }
+          ],
+          "reserved_temporary_bytes": 0,
+          "scheduled_operations": 0,
+          "gpu_lock_held": false,
+          "owned_child_pids": []
+        }
+      ]
+    },
+    {
+      "scenario": "restart-inflight",
+      "run_id": "run-20261025T011735Z-1ebddc1b",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "restart-prepare",
+          "status": "passed",
+          "elapsed_seconds": 22.174030132999178,
+          "result": {
+            "model": "qwen3-asr-1.7b",
+            "durable_job_id": "wb_afa2ebca7bd34fd794be6442033aadd6",
+            "volatile_job_id": null,
+            "fixture": "normal service shutdown after checkpoint commit; local deterministic boundary hook",
+            "checkpoint_resume_tested": true,
+            "planned_chunks": 4,
+            "saved_checkpoints": {
+              "chunk-00000.json": {
+                "sha256": "6cecf3b4cd9b78b7dd833309fbde3645f68dc460a0018a6be4f4931428b396b2"
+              }
+            },
+            "asset_before": {
+              "sha256": "34033bcf936e185dc9899f92db05029c679b45467ae1dc81869d5486ebf50bb8",
+              "inode": 386828,
+              "mtime_ns": 1792891056910694012,
+              "bytes": 5760044
+            },
+            "events_before": {
+              "job.queued": 1,
+              "job.started": 1,
+              "media.probed": 1,
+              "media.normalized": 1,
+              "media.reused": 2,
+              "quality.checkpoint_miss": 1,
+              "chunk.started": 1,
+              "model.loading": 1,
+              "worker.started": 1,
+              "model.loaded": 1,
+              "chunk.completed": 1,
+              "operation.finished": 1
+            },
+            "unload_before_restart": {
+              "model": "qwen3-asr-1.7b",
+              "before_pid": 3918,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "qwen3-asr-1.7b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            }
+          }
+        },
+        {
+          "phase": "restart-restore",
+          "status": "passed",
+          "elapsed_seconds": 25.361926648001827,
+          "result": {
+            "model": "qwen3-asr-1.7b",
+            "durable_job_id": "wb_afa2ebca7bd34fd794be6442033aadd6",
+            "volatile_job_id": null,
+            "fixture": "normal service shutdown after checkpoint commit; local deterministic boundary hook",
+            "checkpoint_resume_tested": true,
+            "planned_chunks": 4,
+            "saved_checkpoints": {
+              "chunk-00000.json": {
+                "sha256": "6cecf3b4cd9b78b7dd833309fbde3645f68dc460a0018a6be4f4931428b396b2"
+              }
+            },
+            "asset_before": {
+              "sha256": "34033bcf936e185dc9899f92db05029c679b45467ae1dc81869d5486ebf50bb8",
+              "inode": 386828,
+              "mtime_ns": 1792891056910694012,
+              "bytes": 5760044
+            },
+            "events_before": {
+              "job.queued": 1,
+              "job.started": 1,
+              "media.probed": 1,
+              "media.normalized": 1,
+              "media.reused": 2,
+              "quality.checkpoint_miss": 1,
+              "chunk.started": 1,
+              "model.loading": 1,
+              "worker.started": 1,
+              "model.loaded": 1,
+              "chunk.completed": 1,
+              "operation.finished": 1
+            },
+            "unload_before_restart": {
+              "model": "qwen3-asr-1.7b",
+              "before_pid": 3918,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "qwen3-asr-1.7b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            },
+            "restored_states": [
+              "queued",
+              "transcribing",
+              "completed"
+            ],
+            "restored_text_chars": 1123,
+            "unload": {
+              "model": "qwen3-asr-1.7b",
+              "before_pid": 4063,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "qwen3-asr-1.7b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            },
+            "asset_after": {
+              "sha256": "34033bcf936e185dc9899f92db05029c679b45467ae1dc81869d5486ebf50bb8",
+              "inode": 386828,
+              "mtime_ns": 1792891056910694012,
+              "bytes": 5760044
+            },
+            "checkpoint_hits_after_restart": 1,
+            "normalized_again_after_restart": 0,
+            "saved_chunk_text_preserved": true,
+            "events_after": {
+              "job.queued": 2,
+              "job.started": 2,
+              "media.probed": 1,
+              "media.normalized": 1,
+              "media.reused": 5,
+              "quality.checkpoint_miss": 4,
+              "chunk.started": 4,
+              "model.loading": 2,
+              "worker.started": 2,
+              "model.loaded": 2,
+              "chunk.completed": 4,
+              "operation.finished": 2,
+              "quality.checkpoint_hit": 1,
+              "job.completed": 1
+            }
+          }
+        }
+      ],
+      "shutdown_snapshots": [
+        {
+          "point": "after_app_shutdown",
+          "phase": "restart-prepare",
+          "models": [
+            {
+              "id": "qwen3-asr-1.7b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "qwen3-asr-0.6b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "moss-transcribe-diarize-0.9b",
+              "engine_id": "moss",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            }
+          ],
+          "reserved_temporary_bytes": 0,
+          "scheduled_operations": 0,
+          "gpu_lock_held": false,
+          "owned_child_pids": []
+        },
+        {
+          "point": "after_app_shutdown",
+          "phase": "restart-restore",
+          "models": [
+            {
+              "id": "qwen3-asr-1.7b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "qwen3-asr-0.6b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "moss-transcribe-diarize-0.9b",
+              "engine_id": "moss",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            }
+          ],
+          "reserved_temporary_bytes": 0,
+          "scheduled_operations": 0,
+          "gpu_lock_held": false,
+          "owned_child_pids": []
+        }
+      ]
+    },
+    {
+      "scenario": "workbench-180s",
+      "run_id": "run-20261025T010818Z-8553bae4",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "workbench",
+          "status": "passed",
+          "elapsed_seconds": 35.73212333799893,
+          "result": {
+            "model": "qwen3-asr-1.7b",
+            "states": [
+              "queued",
+              "transcribing",
+              "completed"
+            ],
+            "text_chars": 1123,
+            "timestamp_sources": [
+              "qwen3_forced_aligner"
+            ],
+            "timestamp_count": 991,
+            "checkpoint_count": 4,
+            "exports": {
+              "txt": 200,
+              "json": 200,
+              "srt": 200,
+              "vtt": 200
+            },
+            "edit_states": [
+              "pending",
+              "aligned"
+            ],
+            "edited_version": 2,
+            "edited_timestamp_sources": [
+              "qwen3_forced_aligner"
+            ],
+            "edited_alignment": "aligned",
+            "owner_isolation": true,
+            "deleted": true,
+            "unload": {
+              "model": "qwen3-asr-1.7b",
+              "before_pid": 2744,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "qwen3-asr-1.7b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            }
+          }
+        }
+      ],
+      "shutdown_snapshots": [
+        {
+          "point": "after_app_shutdown",
+          "phase": "workbench",
+          "models": [
+            {
+              "id": "qwen3-asr-1.7b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "qwen3-asr-0.6b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "moss-transcribe-diarize-0.9b",
+              "engine_id": "moss",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            }
+          ],
+          "reserved_temporary_bytes": 0,
+          "scheduled_operations": 0,
+          "gpu_lock_held": false,
+          "owned_child_pids": []
+        }
+      ]
+    },
+    {
+      "scenario": "workbench-600s",
+      "run_id": "run-20261025T012045Z-2ed27308",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "workbench",
+          "status": "passed",
+          "elapsed_seconds": 68.77263711699925,
+          "result": {
+            "model": "qwen3-asr-1.7b",
+            "states": [
+              "queued",
+              "preprocessing",
+              "transcribing",
+              "completed"
+            ],
+            "text_chars": 3425,
+            "timestamp_sources": [
+              "qwen3_forced_aligner"
+            ],
+            "timestamp_count": 3091,
+            "checkpoint_count": 11,
+            "exports": {
+              "txt": 200,
+              "json": 200,
+              "srt": 200,
+              "vtt": 200
+            },
+            "edit_states": [
+              "pending",
+              "aligned"
+            ],
+            "edited_version": 2,
+            "edited_timestamp_sources": [
+              "qwen3_forced_aligner"
+            ],
+            "edited_alignment": "aligned",
+            "owner_isolation": true,
+            "deleted": true,
+            "unload": {
+              "model": "qwen3-asr-1.7b",
+              "before_pid": 4652,
+              "after_pid": null,
+              "worker_reaped": true,
+              "mock_has_no_worker": false,
+              "response": {
+                "id": "qwen3-asr-1.7b",
+                "status": "unloaded",
+                "active_requests": 0,
+                "rejecting_new_requests": false
+              }
+            }
+          }
+        }
+      ],
+      "shutdown_snapshots": [
+        {
+          "point": "after_app_shutdown",
+          "phase": "workbench",
+          "models": [
+            {
+              "id": "qwen3-asr-1.7b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "qwen3-asr-0.6b",
+              "engine_id": "qwen",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            },
+            {
+              "id": "moss-transcribe-diarize-0.9b",
+              "engine_id": "moss",
+              "status": "unloaded",
+              "active_requests": 0,
+              "worker_pid": null,
+              "worker_alive": false
+            }
+          ],
+          "reserved_temporary_bytes": 0,
+          "scheduled_operations": 0,
+          "gpu_lock_held": false,
+          "owned_child_pids": []
+        }
+      ]
+    }
+  ],
+  "process_metrics": [
+    {
+      "name": "automatic-model-switch",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 22.8866968250004,
+      "baseline_mib": 1240,
+      "peak_mib": 5353,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "forced-alignment06-zh",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 12.53604127500148,
+      "baseline_mib": 1240,
+      "peak_mib": 5157,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "legacy-api",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 32.169341632004944,
+      "baseline_mib": 1240,
+      "peak_mib": 3501,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "matched-gpu-comparison",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 280.6169798539995,
+      "baseline_mib": 1240,
+      "peak_mib": 7833,
+      "end_mib": 1272,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "moss-api-180s-explicit8192",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 67.02356658499775,
+      "baseline_mib": 1240,
+      "peak_mib": 3915,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "moss-api-180s",
+      "exit_code": 1,
+      "timed_out": false,
+      "wall_seconds": 58.64359823000268,
+      "baseline_mib": 1240,
+      "peak_mib": 3855,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "moss-backend-30s",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 17.793162564994418,
+      "baseline_mib": 1240,
+      "peak_mib": 3457,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "moss-native-rss",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 63.927206879998266,
+      "baseline_mib": 1283,
+      "peak_mib": 3958,
+      "end_mib": 1283,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory",
+      "rss_sampling": {
+        "scope": "owned process-group /proc RSS every 0.5s; shared pages counted in each process; gateway separate from child workers and FFmpeg",
+        "gateway_peak_mib": 604.48046875,
+        "child_individual_peaks_mib": {
+          "7050": 43.375,
+          "7071": 13.75,
+          "7072": 3375.37890625
+        },
+        "children_sum_peak_mib": 3389.12890625
+      }
+    },
+    {
+      "name": "prefetch-comparison",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 96.0308256960052,
+      "baseline_mib": 1283,
+      "peak_mib": 3544,
+      "end_mib": 1283,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory",
+      "rss_sampling": {
+        "scope": "owned process-group /proc RSS every 0.5s; shared pages counted in each process; gateway separate from child workers and FFmpeg",
+        "gateway_peak_mib": 24.68359375,
+        "child_individual_peaks_mib": {},
+        "children_sum_peak_mib": 0
+      }
+    },
+    {
+      "name": "qwen06-backend-zh",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 29.001263746002223,
+      "baseline_mib": 1240,
+      "peak_mib": 3389,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "restart-inflight",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 49.04763498900138,
+      "baseline_mib": 1240,
+      "peak_mib": 8019,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "workbench-17b-180s",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 36.90924816799816,
+      "baseline_mib": 1240,
+      "peak_mib": 7801,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    },
+    {
+      "name": "workbench-17b-600s",
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 70.33750809800404,
+      "baseline_mib": 1240,
+      "peak_mib": 7857,
+      "end_mib": 1240,
+      "scope": "whole GPU sampling, includes Windows and unrelated processes; not worker torch allocated memory"
+    }
+  ],
+  "job_timing_samples": [
+    {
+      "scenario": "workbench-180s",
+      "duration_seconds": 180.0,
+      "processing_wall_seconds": 29.495796,
+      "created_to_completed_seconds": 29.741907,
+      "rtf_processing": 0.1638655333333333,
+      "rtf_end_to_end": 0.16523281666666667,
+      "pipeline_timings_ms": {
+        "total_ms": 29437.833279000188,
+        "decode_ms": 0.0,
+        "inference_ms": 18557.796397988568,
+        "postprocess_ms": 3071.2647899999865
+      },
+      "scope": "processing is durable started_at to completed_at; end-to-end is created_at to completed_at, includes queue and normalization; excludes upload and post-completion edit/export"
+    },
+    {
+      "scenario": "workbench-600s",
+      "duration_seconds": 600.0,
+      "processing_wall_seconds": 62.093514,
+      "created_to_completed_seconds": 62.535344,
+      "rtf_processing": 0.10348919,
+      "rtf_end_to_end": 0.10422557333333334,
+      "pipeline_timings_ms": {
+        "total_ms": 62028.53489200061,
+        "decode_ms": 0.0,
+        "inference_ms": 53310.65759799094,
+        "postprocess_ms": 2856.7854949942557
+      },
+      "scope": "processing is durable started_at to completed_at; end-to-end is created_at to completed_at, includes queue and normalization; excludes upload and post-completion edit/export"
+    }
+  ],
+  "comparison": {
+    "status": "completed",
+    "audio": {
+      "sha256": "eec75ced0728ecc5de5dd58da73943005be26f5d01e4d9ebc5add0122fac2c42",
+      "duration_seconds": 180.0,
+      "size_bytes": 5760078
+    },
+    "sources": {
+      "baseline": {
+        "label": "baseline-source",
+        "runtime_source_sha256": "5b06a353a13914ef87ab3006880b3e643e741f67ec0885c855af5db09f7fed2b",
+        "helper_sha256": "67993f5b1230d0aebcf447ee91325f39ab53c2139d5feb5f14edca68f45742a4",
+        "files_hashed": 45
+      },
+      "current_info": {
+        "label": "source",
+        "runtime_source_sha256": "5abfac9ede03e429b68c433904715704ac2d712a3f28613512798dfaeac4d954",
+        "helper_sha256": "67993f5b1230d0aebcf447ee91325f39ab53c2139d5feb5f14edca68f45742a4",
+        "files_hashed": 52
+      }
+    },
+    "repeats": 3,
+    "cache": "every run starts a fresh gateway/model process; existing disk cache, downloads disabled",
+    "order": "all baseline repetitions, then all current INFO repetitions; optional current CRITICAL last",
+    "interpretation": "workflow wall time includes loading, upload, recognition, edit alignment, export and cleanup; baseline text is not accuracy ground truth",
+    "logging_interpretation": "small-sample exploratory comparison; it cannot establish a stable logging overhead below 3 percent",
+    "aggregates": {
+      "baseline": {
+        "runs": 3,
+        "median_process_wall_seconds": 30.690154016003362,
+        "min_process_wall_seconds": 29.240674095999566,
+        "max_process_wall_seconds": 31.062438512999506,
+        "median_workflow_rtf_end_to_end": 0.17050085564446313,
+        "text_digests": [
+          "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2"
+        ]
+      },
+      "current_info": {
+        "runs": 3,
+        "median_process_wall_seconds": 31.542659154998546,
+        "min_process_wall_seconds": 31.1415357290025,
+        "max_process_wall_seconds": 32.14802279799915,
+        "median_workflow_rtf_end_to_end": 0.17523699530554748,
+        "text_digests": [
+          "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2"
+        ]
+      },
+      "current_critical": {
+        "runs": 3,
+        "median_process_wall_seconds": 31.722243820993754,
+        "min_process_wall_seconds": 30.895291184999223,
+        "max_process_wall_seconds": 32.05059608800366,
+        "median_workflow_rtf_end_to_end": 0.17623468789440974,
+        "text_digests": [
+          "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2"
+        ]
+      }
+    },
+    "current_vs_baseline_wall_change_percent": 2.777780582497713,
+    "observed_info_vs_critical_wall_change_percent": -0.5661158996462912,
+    "frozen_workload_identity_matches": true,
+    "runs": [
+      {
+        "run": "baseline-01",
+        "iteration": 1,
+        "exit_code": 0,
+        "process_wall_seconds": 29.240674095999566,
+        "workflow_rtf_end_to_end": 0.1624481894222198,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": null,
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 28.888106559003063,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 23807.991756002593,
+          "decode_ms": 103.69057400384918,
+          "inference_ms": 17825.41462500376,
+          "postprocess_ms": 1536.6209220010205
+        }
+      },
+      {
+        "run": "baseline-02",
+        "iteration": 2,
+        "exit_code": 0,
+        "process_wall_seconds": 31.062438512999506,
+        "workflow_rtf_end_to_end": 0.17256910284999727,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": null,
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 30.732106969000597,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 25484.922615003597,
+          "decode_ms": 101.32788899500156,
+          "inference_ms": 18952.412916005414,
+          "postprocess_ms": 1615.5061829995248
+        }
+      },
+      {
+        "run": "baseline-03",
+        "iteration": 3,
+        "exit_code": 0,
+        "process_wall_seconds": 30.690154016003362,
+        "workflow_rtf_end_to_end": 0.17050085564446313,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": null,
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 30.38865013299801,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 25227.67017300066,
+          "decode_ms": 97.67023399763275,
+          "inference_ms": 18723.34590299579,
+          "postprocess_ms": 1671.2522359957802
+        }
+      },
+      {
+        "run": "current_info-01",
+        "iteration": 1,
+        "exit_code": 0,
+        "process_wall_seconds": 31.1415357290025,
+        "workflow_rtf_end_to_end": 0.17300853182779166,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": "INFO",
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 30.651594490002026,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 24646.063402993605,
+          "decode_ms": 0.0,
+          "inference_ms": 18203.152673995646,
+          "postprocess_ms": 1577.8837210091297
+        }
+      },
+      {
+        "run": "current_info-02",
+        "iteration": 2,
+        "exit_code": 0,
+        "process_wall_seconds": 31.542659154998546,
+        "workflow_rtf_end_to_end": 0.17523699530554748,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": "INFO",
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 31.011855554999784,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 24899.98737499991,
+          "decode_ms": 0.0,
+          "inference_ms": 18396.062536005047,
+          "postprocess_ms": 1590.2599490000284
+        }
+      },
+      {
+        "run": "current_info-03",
+        "iteration": 3,
+        "exit_code": 0,
+        "process_wall_seconds": 32.14802279799915,
+        "workflow_rtf_end_to_end": 0.1786001266555508,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": "INFO",
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 31.582304133000434,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 25812.212463002652,
+          "decode_ms": 0.0,
+          "inference_ms": 19337.08276299876,
+          "postprocess_ms": 1585.9063349998905
+        }
+      },
+      {
+        "run": "current_critical-01",
+        "iteration": 1,
+        "exit_code": 0,
+        "process_wall_seconds": 32.05059608800366,
+        "workflow_rtf_end_to_end": 0.17805886715557587,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": "CRITICAL",
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 31.448726501999772,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 25633.20037399535,
+          "decode_ms": 0.0,
+          "inference_ms": 18852.946683990012,
+          "postprocess_ms": 1657.4583719993825
+        }
+      },
+      {
+        "run": "current_critical-02",
+        "iteration": 2,
+        "exit_code": 0,
+        "process_wall_seconds": 30.895291184999223,
+        "workflow_rtf_end_to_end": 0.17164050658332902,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": "CRITICAL",
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 30.331292840004608,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 24593.84521699394,
+          "decode_ms": 0.0,
+          "inference_ms": 17978.815406997455,
+          "postprocess_ms": 1565.2360919993953
+        }
+      },
+      {
+        "run": "current_critical-03",
+        "iteration": 3,
+        "exit_code": 0,
+        "process_wall_seconds": 31.722243820993754,
+        "workflow_rtf_end_to_end": 0.17623468789440974,
+        "model_state": "cold: new gateway/model worker processes",
+        "disk_model_cache": "existing cache; offline-only",
+        "logging_level": "CRITICAL",
+        "text_sha256": "011213567551f61178996d59e2bc2d443b56c353ab4f6aabfc31f456d08334d2",
+        "text_characters": 1123,
+        "timestamp_count": 991,
+        "timestamp_sources": [
+          "qwen3_forced_aligner"
+        ],
+        "segment_count": 61,
+        "model_revision": "057a3b044fcd31c433e7971ab40d68d20e7eae6d",
+        "aligner_revision": "c07281df297b9905d24a508279258cccf987a064",
+        "speech_detector": {
+          "available": true,
+          "detector": "silero-vad",
+          "version": "6.2.3",
+          "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+          "sample_rate": 16000,
+          "frame_samples": 512,
+          "threshold": 0.5,
+          "target_peak": 0.9,
+          "max_gain": 100,
+          "timeout_seconds": 60.0
+        },
+        "profile_version": "quality_v1.4",
+        "edit_version": 2,
+        "edit_alignment": "aligned",
+        "exports": {
+          "txt": 200,
+          "srt": 200,
+          "vtt": 200,
+          "json": 200
+        },
+        "deleted": true,
+        "smoke_wall_seconds": 31.19388506100222,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "silero-vad": null,
+          "httpx": "0.28.1"
+        },
+        "prompt_sha256": [
+          "74c31cf6c3b0f84853ee2b815d4f78768205ffed9d26aaa54ba6a0ef99c8797c"
+        ],
+        "glossary_sha256": [
+          "11d5f3a49b8417bdfde2f78941e9aeaad02da96f749f91889443085f044e8cad"
+        ],
+        "source_import_verified": true,
+        "pipeline_timings_ms": {
+          "total_ms": 25389.358018997882,
+          "decode_ms": 0.0,
+          "inference_ms": 18842.01397000288,
+          "postprocess_ms": 1629.5276489981916
+        }
+      }
+    ]
+  },
+  "moss_default_limit": {
+    "duration_seconds": 180,
+    "max_new_tokens": 2160,
+    "generated_tokens": 2160,
+    "error_code": "generation_truncated",
+    "unchanged_from_baseline": true,
+    "retry_explicit_budget": 8192,
+    "retry_generated_tokens": 2480,
+    "retry_status": "completed"
+  },
+  "prefetch": {
+    "schema_version": 1,
+    "status": "passed",
+    "mock": false,
+    "model": "qwen3-asr-0.6b",
+    "source": {
+      "label": "source",
+      "runtime_source_sha256": "5abfac9ede03e429b68c433904715704ac2d712a3f28613512798dfaeac4d954",
+      "helper_sha256": "67993f5b1230d0aebcf447ee91325f39ab53c2139d5feb5f14edca68f45742a4",
+      "files_hashed": 52
+    },
+    "probe_sha256": "2230c9bc6216cd12fbb2fbac0b77e826b4acd17e589941abab5502b091ac4539",
+    "audio": {
+      "sha256": "20d10bf5167122c5b271b3eecedcde61cd33f4914872a81e5ca9b85e0389cdd0",
+      "bytes": 960078,
+      "duration_seconds": 30.0
+    },
+    "repeats_per_mode": 3,
+    "order": "off1,on1,off2,on2,...",
+    "runs": [
+      {
+        "run": "off-01",
+        "mode": "real-offline",
+        "prefetch": false,
+        "batch_jobs": 3,
+        "batch_wall_seconds": 14.960898061006446,
+        "batch_rtf_end_to_end": 0.1662322006778494,
+        "batch_throughput_audio_seconds_per_wall_second": 6.015681654470517,
+        "model_state": "fresh model and gateway process; disk inputs explicitly warmed",
+        "cache_warm": {
+          "files_read": 7,
+          "bytes_read": 1577321867,
+          "wall_seconds": 0.10042278499895474,
+          "scope": "existing fixed-revision weights/tokenizer plus audio; no download"
+        },
+        "parameters": {
+          "model": "qwen3-asr-0.6b",
+          "language": "zh",
+          "quality_profile": "legacy",
+          "timestamps": "none",
+          "response_format": "verbose_json",
+          "max_new_tokens": "4096",
+          "split_strategy": "auto"
+        },
+        "model_identity": {
+          "model": "qwen3-asr-0.6b",
+          "revision": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
+          "repository": "Qwen/Qwen3-ASR-0.6B-hf",
+          "engine_id": "qwen",
+          "pipeline_version": "qwen-v1",
+          "engine_version": "1",
+          "default_pipeline": "legacy",
+          "audio_spec": {
+            "sample_rate": 16000,
+            "channels": 1,
+            "sample_width": 2
+          },
+          "runtime_profile_id": "managed-python"
+        },
+        "submitted_order": [
+          "job_6a83417882104b78b36953957dea8087",
+          "job_aeb83308e101401786319d878e5f5715",
+          "job_a1b975a991824ffda3a9b91b7e8f09f5"
+        ],
+        "started_order": [
+          "job_6a83417882104b78b36953957dea8087",
+          "job_aeb83308e101401786319d878e5f5715",
+          "job_a1b975a991824ffda3a9b91b7e8f09f5"
+        ],
+        "sequences": [
+          1,
+          2,
+          3
+        ],
+        "phases": {
+          "job_6a83417882104b78b36953957dea8087": [
+            "preprocessing",
+            "loading_model",
+            "transcribing",
+            "completed"
+          ],
+          "job_aeb83308e101401786319d878e5f5715": [
+            "queued",
+            "preprocessing",
+            "transcribing",
+            "completed"
+          ],
+          "job_a1b975a991824ffda3a9b91b7e8f09f5": [
+            "queued",
+            "preprocessing",
+            "transcribing",
+            "completed"
+          ]
+        },
+        "normalization_calls_by_job": {
+          "job_6a83417882104b78b36953957dea8087": 1,
+          "job_aeb83308e101401786319d878e5f5715": 1,
+          "job_a1b975a991824ffda3a9b91b7e8f09f5": 1
+        },
+        "model_loads": 1,
+        "worker_pid": 7473,
+        "worker_reaped": true,
+        "temporary_quota_after": 0,
+        "jobs": [
+          {
+            "job_id": "job_6a83417882104b78b36953957dea8087",
+            "batch_index": 1,
+            "created_at": "2026-10-25T01:32:48.645036Z",
+            "started_at": "2026-10-25T01:32:48.729998Z",
+            "completed_at": "2026-10-25T01:32:59.294326Z",
+            "queue_and_prepare_before_started_seconds": 0.08496212959289551,
+            "processing_after_started_seconds": 10.564327955245972,
+            "end_to_end_since_created_seconds": 10.649290084838867,
+            "rtf_processing_after_started": 0.35214426517486574,
+            "rtf_end_to_end_since_created": 0.3549763361612956,
+            "result_timings": {
+              "total_ms": 10356.894494994776,
+              "load_ms": 3798.231839995424,
+              "decode_ms": 93.41920999577269,
+              "inference_ms": 6462.42124800483,
+              "postprocess_ms": 0.003239998477511108
+            },
+            "reported_pipeline_rtf": 0.34522981649982587,
+            "cold_model_load": true,
+            "model_loaded_events": [
+              {
+                "ts": "2026-10-25T01:32:52.827921Z",
+                "job_id": "job_6a83417882104b78b36953957dea8087",
+                "model_id": "qwen3-asr-0.6b",
+                "duration_ms": 3798.231839995424
+              }
+            ]
+          },
+          {
+            "job_id": "job_aeb83308e101401786319d878e5f5715",
+            "batch_index": 2,
+            "created_at": "2026-10-25T01:32:48.924359Z",
+            "started_at": "2026-10-25T01:32:59.294445Z",
+            "completed_at": "2026-10-25T01:33:01.291388Z",
+            "queue_and_prepare_before_started_seconds": 10.370085954666138,
+            "processing_after_started_seconds": 1.9969429969787598,
+            "end_to_end_since_created_seconds": 12.367028951644897,
+            "rtf_processing_after_started": 0.06656476656595865,
+            "rtf_end_to_end_since_created": 0.4122342983881632,
+            "result_timings": {
+              "total_ms": 1993.5728880009265,
+              "load_ms": 0.0,
+              "decode_ms": 40.20350200153189,
+              "inference_ms": 1950.702296999225,
+              "postprocess_ms": 0.0030800001695752144
+            },
+            "reported_pipeline_rtf": 0.06645242960003088,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          },
+          {
+            "job_id": "job_a1b975a991824ffda3a9b91b7e8f09f5",
+            "batch_index": 3,
+            "created_at": "2026-10-25T01:32:48.958684Z",
+            "started_at": "2026-10-25T01:33:01.291509Z",
+            "completed_at": "2026-10-25T01:33:03.551595Z",
+            "queue_and_prepare_before_started_seconds": 12.332824945449829,
+            "processing_after_started_seconds": 2.2600860595703125,
+            "end_to_end_since_created_seconds": 14.592911005020142,
+            "rtf_processing_after_started": 0.07533620198567709,
+            "rtf_end_to_end_since_created": 0.4864303668340047,
+            "result_timings": {
+              "total_ms": 2255.396439002652,
+              "load_ms": 0.0,
+              "decode_ms": 42.68199900252512,
+              "inference_ms": 2210.0882309969165,
+              "postprocess_ms": 0.0016899939510039985
+            },
+            "reported_pipeline_rtf": 0.0751798813000884,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          }
+        ],
+        "job_timing_interpretation": "created is after upload/hash; started is _run_job entry. With prefetch on, normalization precedes started, so processing-after-started and pipeline total exclude prefetched decoding. Batch wall and end-to-end include it; overlapping stages must not be summed.",
+        "model_loaded_events": [
+          {
+            "ts": "2026-10-25T01:32:52.827921Z",
+            "job_id": "job_6a83417882104b78b36953957dea8087",
+            "model_id": "qwen3-asr-0.6b",
+            "duration_ms": 3798.231839995424
+          }
+        ],
+        "inference_interval_source": "actual parent-worker transcription RPC envelope elapsed time",
+        "interval_interpretation": "UTC completion timestamp minus monotonic RPC duration; contains IPC and scheduling, not CUDA kernel timing",
+        "inference_intervals": [
+          {
+            "job_id": "job_6a83417882104b78b36953957dea8087",
+            "start_utc_seconds": 1792891972.8285344,
+            "end_utc_seconds": 1792891979.292449,
+            "rpc_duration_seconds": 6.463914706997457,
+            "worker_pid": 7473,
+            "rpc_request_id": 3
+          },
+          {
+            "job_id": "job_aeb83308e101401786319d878e5f5715",
+            "start_utc_seconds": 1792891979.337405,
+            "end_utc_seconds": 1792891981.289553,
+            "rpc_duration_seconds": 1.952147915995738,
+            "worker_pid": 7473,
+            "rpc_request_id": 4
+          },
+          {
+            "job_id": "job_a1b975a991824ffda3a9b91b7e8f09f5",
+            "start_utc_seconds": 1792891981.3380494,
+            "end_utc_seconds": 1792891983.549563,
+            "rpc_duration_seconds": 2.2115134569976362,
+            "worker_pid": 7473,
+            "rpc_request_id": 5
+          }
+        ],
+        "inter_call_gap_proxy_seconds": [
+          0.04495596885681152,
+          0.04849648475646973
+        ],
+        "inter_call_gap_proxy_total_seconds": 0.09345245361328125,
+        "inter_call_gap_proxy_max_seconds": 0.04849648475646973,
+        "texts": [
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          }
+        ],
+        "dropped_log_events": 0,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "httpx": "0.28.1"
+        },
+        "python": "3.12.13"
+      },
+      {
+        "run": "on-01",
+        "mode": "real-offline",
+        "prefetch": true,
+        "batch_jobs": 3,
+        "batch_wall_seconds": 12.125566681999771,
+        "batch_rtf_end_to_end": 0.13472851868888636,
+        "batch_throughput_audio_seconds_per_wall_second": 7.4223335172948,
+        "model_state": "fresh model and gateway process; disk inputs explicitly warmed",
+        "cache_warm": {
+          "files_read": 7,
+          "bytes_read": 1577321867,
+          "wall_seconds": 0.051459850001265295,
+          "scope": "existing fixed-revision weights/tokenizer plus audio; no download"
+        },
+        "parameters": {
+          "model": "qwen3-asr-0.6b",
+          "language": "zh",
+          "quality_profile": "legacy",
+          "timestamps": "none",
+          "response_format": "verbose_json",
+          "max_new_tokens": "4096",
+          "split_strategy": "auto"
+        },
+        "model_identity": {
+          "model": "qwen3-asr-0.6b",
+          "revision": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
+          "repository": "Qwen/Qwen3-ASR-0.6B-hf",
+          "engine_id": "qwen",
+          "pipeline_version": "qwen-v1",
+          "engine_version": "1",
+          "default_pipeline": "legacy",
+          "audio_spec": {
+            "sample_rate": 16000,
+            "channels": 1,
+            "sample_width": 2
+          },
+          "runtime_profile_id": "managed-python"
+        },
+        "submitted_order": [
+          "job_60193ba16e42421a973cb478e236a690",
+          "job_214ae879a1e14e59ab48ea2b28ce375e",
+          "job_0d61a02275c141c5af338941cb90ae8b"
+        ],
+        "started_order": [
+          "job_60193ba16e42421a973cb478e236a690",
+          "job_214ae879a1e14e59ab48ea2b28ce375e",
+          "job_0d61a02275c141c5af338941cb90ae8b"
+        ],
+        "sequences": [
+          1,
+          2,
+          3
+        ],
+        "phases": {
+          "job_60193ba16e42421a973cb478e236a690": [
+            "queued",
+            "loading_model",
+            "transcribing",
+            "completed"
+          ],
+          "job_214ae879a1e14e59ab48ea2b28ce375e": [
+            "queued",
+            "transcribing",
+            "completed"
+          ],
+          "job_0d61a02275c141c5af338941cb90ae8b": [
+            "queued",
+            "transcribing",
+            "completed"
+          ]
+        },
+        "normalization_calls_by_job": {
+          "job_60193ba16e42421a973cb478e236a690": 1,
+          "job_214ae879a1e14e59ab48ea2b28ce375e": 1,
+          "job_0d61a02275c141c5af338941cb90ae8b": 1
+        },
+        "model_loads": 1,
+        "worker_pid": 7677,
+        "worker_reaped": true,
+        "temporary_quota_after": 0,
+        "jobs": [
+          {
+            "job_id": "job_60193ba16e42421a973cb478e236a690",
+            "batch_index": 1,
+            "created_at": "2026-10-25T01:33:06.440475Z",
+            "started_at": "2026-10-25T01:33:06.735093Z",
+            "completed_at": "2026-10-25T01:33:14.646961Z",
+            "queue_and_prepare_before_started_seconds": 0.2946181297302246,
+            "processing_after_started_seconds": 7.91186785697937,
+            "end_to_end_since_created_seconds": 8.206485986709595,
+            "rtf_processing_after_started": 0.263728928565979,
+            "rtf_end_to_end_since_created": 0.2735495328903198,
+            "result_timings": {
+              "total_ms": 7898.319293999521,
+              "load_ms": 3662.3126650010818,
+              "decode_ms": 0.0,
+              "inference_ms": 4232.848826002737,
+              "postprocess_ms": 0.006971000402700156
+            },
+            "reported_pipeline_rtf": 0.26327730979998404,
+            "cold_model_load": true,
+            "model_loaded_events": [
+              {
+                "ts": "2026-10-25T01:33:10.409452Z",
+                "job_id": "job_60193ba16e42421a973cb478e236a690",
+                "model_id": "qwen3-asr-0.6b",
+                "duration_ms": 3662.3126650010818
+              }
+            ]
+          },
+          {
+            "job_id": "job_214ae879a1e14e59ab48ea2b28ce375e",
+            "batch_index": 2,
+            "created_at": "2026-10-25T01:33:06.516721Z",
+            "started_at": "2026-10-25T01:33:14.647126Z",
+            "completed_at": "2026-10-25T01:33:16.548462Z",
+            "queue_and_prepare_before_started_seconds": 8.130404949188232,
+            "processing_after_started_seconds": 1.9013359546661377,
+            "end_to_end_since_created_seconds": 10.03174090385437,
+            "rtf_processing_after_started": 0.06337786515553792,
+            "rtf_end_to_end_since_created": 0.33439136346181236,
+            "result_timings": {
+              "total_ms": 1895.633779997297,
+              "load_ms": 0.0,
+              "decode_ms": 0.0,
+              "inference_ms": 1892.6069109948003,
+              "postprocess_ms": 0.002510001650080085
+            },
+            "reported_pipeline_rtf": 0.06318779266657656,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          },
+          {
+            "job_id": "job_0d61a02275c141c5af338941cb90ae8b",
+            "batch_index": 3,
+            "created_at": "2026-10-25T01:33:06.660643Z",
+            "started_at": "2026-10-25T01:33:16.548579Z",
+            "completed_at": "2026-10-25T01:33:18.502642Z",
+            "queue_and_prepare_before_started_seconds": 9.887935876846313,
+            "processing_after_started_seconds": 1.9540629386901855,
+            "end_to_end_since_created_seconds": 11.841998815536499,
+            "rtf_processing_after_started": 0.06513543128967285,
+            "rtf_end_to_end_since_created": 0.39473329385121664,
+            "result_timings": {
+              "total_ms": 1950.5715269988286,
+              "load_ms": 0.0,
+              "decode_ms": 0.0,
+              "inference_ms": 1946.569728999748,
+              "postprocess_ms": 0.0022999956854619086
+            },
+            "reported_pipeline_rtf": 0.06501905089996095,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          }
+        ],
+        "job_timing_interpretation": "created is after upload/hash; started is _run_job entry. With prefetch on, normalization precedes started, so processing-after-started and pipeline total exclude prefetched decoding. Batch wall and end-to-end include it; overlapping stages must not be summed.",
+        "model_loaded_events": [
+          {
+            "ts": "2026-10-25T01:33:10.409452Z",
+            "job_id": "job_60193ba16e42421a973cb478e236a690",
+            "model_id": "qwen3-asr-0.6b",
+            "duration_ms": 3662.3126650010818
+          }
+        ],
+        "inference_interval_source": "actual parent-worker transcription RPC envelope elapsed time",
+        "interval_interpretation": "UTC completion timestamp minus monotonic RPC duration; contains IPC and scheduling, not CUDA kernel timing",
+        "inference_intervals": [
+          {
+            "job_id": "job_60193ba16e42421a973cb478e236a690",
+            "start_utc_seconds": 1792891990.4101362,
+            "end_utc_seconds": 1792891994.644651,
+            "rpc_duration_seconds": 4.234514724994369,
+            "worker_pid": 7677,
+            "rpc_request_id": 3
+          },
+          {
+            "job_id": "job_214ae879a1e14e59ab48ea2b28ce375e",
+            "start_utc_seconds": 1792891994.652215,
+            "end_utc_seconds": 1792891996.546554,
+            "rpc_duration_seconds": 1.894339097001648,
+            "worker_pid": 7677,
+            "rpc_request_id": 4
+          },
+          {
+            "job_id": "job_0d61a02275c141c5af338941cb90ae8b",
+            "start_utc_seconds": 1792891996.5515006,
+            "end_utc_seconds": 1792891998.499505,
+            "rpc_duration_seconds": 1.9480044489973807,
+            "worker_pid": 7677,
+            "rpc_request_id": 5
+          }
+        ],
+        "inter_call_gap_proxy_seconds": [
+          0.007564067840576172,
+          0.004946470260620117
+        ],
+        "inter_call_gap_proxy_total_seconds": 0.012510538101196289,
+        "inter_call_gap_proxy_max_seconds": 0.007564067840576172,
+        "texts": [
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          }
+        ],
+        "dropped_log_events": 0,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "httpx": "0.28.1"
+        },
+        "python": "3.12.13"
+      },
+      {
+        "run": "off-02",
+        "mode": "real-offline",
+        "prefetch": false,
+        "batch_jobs": 3,
+        "batch_wall_seconds": 12.408170417998917,
+        "batch_rtf_end_to_end": 0.13786856019998797,
+        "batch_throughput_audio_seconds_per_wall_second": 7.253285292523764,
+        "model_state": "fresh model and gateway process; disk inputs explicitly warmed",
+        "cache_warm": {
+          "files_read": 7,
+          "bytes_read": 1577321867,
+          "wall_seconds": 0.05052106200309936,
+          "scope": "existing fixed-revision weights/tokenizer plus audio; no download"
+        },
+        "parameters": {
+          "model": "qwen3-asr-0.6b",
+          "language": "zh",
+          "quality_profile": "legacy",
+          "timestamps": "none",
+          "response_format": "verbose_json",
+          "max_new_tokens": "4096",
+          "split_strategy": "auto"
+        },
+        "model_identity": {
+          "model": "qwen3-asr-0.6b",
+          "revision": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
+          "repository": "Qwen/Qwen3-ASR-0.6B-hf",
+          "engine_id": "qwen",
+          "pipeline_version": "qwen-v1",
+          "engine_version": "1",
+          "default_pipeline": "legacy",
+          "audio_spec": {
+            "sample_rate": 16000,
+            "channels": 1,
+            "sample_width": 2
+          },
+          "runtime_profile_id": "managed-python"
+        },
+        "submitted_order": [
+          "job_c0574533b99440c6b00c4896c8dcfa45",
+          "job_27cf1cf1a87b48a29401dc985be1ec92",
+          "job_e93fba5d91ea42c7aca6bf3b6a98bf5e"
+        ],
+        "started_order": [
+          "job_c0574533b99440c6b00c4896c8dcfa45",
+          "job_27cf1cf1a87b48a29401dc985be1ec92",
+          "job_e93fba5d91ea42c7aca6bf3b6a98bf5e"
+        ],
+        "sequences": [
+          1,
+          2,
+          3
+        ],
+        "phases": {
+          "job_c0574533b99440c6b00c4896c8dcfa45": [
+            "preprocessing",
+            "loading_model",
+            "transcribing",
+            "completed"
+          ],
+          "job_27cf1cf1a87b48a29401dc985be1ec92": [
+            "queued",
+            "preprocessing",
+            "transcribing",
+            "completed"
+          ],
+          "job_e93fba5d91ea42c7aca6bf3b6a98bf5e": [
+            "queued",
+            "preprocessing",
+            "transcribing",
+            "completed"
+          ]
+        },
+        "normalization_calls_by_job": {
+          "job_c0574533b99440c6b00c4896c8dcfa45": 1,
+          "job_27cf1cf1a87b48a29401dc985be1ec92": 1,
+          "job_e93fba5d91ea42c7aca6bf3b6a98bf5e": 1
+        },
+        "model_loads": 1,
+        "worker_pid": 7866,
+        "worker_reaped": true,
+        "temporary_quota_after": 0,
+        "jobs": [
+          {
+            "job_id": "job_c0574533b99440c6b00c4896c8dcfa45",
+            "batch_index": 1,
+            "created_at": "2026-10-25T01:33:21.426503Z",
+            "started_at": "2026-10-25T01:33:21.477291Z",
+            "completed_at": "2026-10-25T01:33:29.248954Z",
+            "queue_and_prepare_before_started_seconds": 0.050788164138793945,
+            "processing_after_started_seconds": 7.771662950515747,
+            "end_to_end_since_created_seconds": 7.822451114654541,
+            "rtf_processing_after_started": 0.25905543168385825,
+            "rtf_end_to_end_since_created": 0.2607483704884847,
+            "result_timings": {
+              "total_ms": 7638.865692002582,
+              "load_ms": 3603.2203150025452,
+              "decode_ms": 90.70993099885527,
+              "inference_ms": 3942.0113500018488,
+              "postprocess_ms": 0.0034100012271665037
+            },
+            "reported_pipeline_rtf": 0.2546288564000861,
+            "cold_model_load": true,
+            "model_loaded_events": [
+              {
+                "ts": "2026-10-25T01:33:25.302803Z",
+                "job_id": "job_c0574533b99440c6b00c4896c8dcfa45",
+                "model_id": "qwen3-asr-0.6b",
+                "duration_ms": 3603.2203150025452
+              }
+            ]
+          },
+          {
+            "job_id": "job_27cf1cf1a87b48a29401dc985be1ec92",
+            "batch_index": 2,
+            "created_at": "2026-10-25T01:33:21.606960Z",
+            "started_at": "2026-10-25T01:33:29.249079Z",
+            "completed_at": "2026-10-25T01:33:31.483296Z",
+            "queue_and_prepare_before_started_seconds": 7.64211893081665,
+            "processing_after_started_seconds": 2.2342169284820557,
+            "end_to_end_since_created_seconds": 9.876335859298706,
+            "rtf_processing_after_started": 0.07447389761606853,
+            "rtf_end_to_end_since_created": 0.32921119530995685,
+            "result_timings": {
+              "total_ms": 2231.0226920017158,
+              "load_ms": 0.0,
+              "decode_ms": 39.29048400459578,
+              "inference_ms": 2189.1413799967268,
+              "postprocess_ms": 0.003150002157781273
+            },
+            "reported_pipeline_rtf": 0.07436742306672386,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          },
+          {
+            "job_id": "job_e93fba5d91ea42c7aca6bf3b6a98bf5e",
+            "batch_index": 3,
+            "created_at": "2026-10-25T01:33:21.618681Z",
+            "started_at": "2026-10-25T01:33:31.483413Z",
+            "completed_at": "2026-10-25T01:33:33.748288Z",
+            "queue_and_prepare_before_started_seconds": 9.864732027053833,
+            "processing_after_started_seconds": 2.2648749351501465,
+            "end_to_end_since_created_seconds": 12.12960696220398,
+            "rtf_processing_after_started": 0.07549583117167155,
+            "rtf_end_to_end_since_created": 0.40432023207346596,
+            "result_timings": {
+              "total_ms": 2261.609042994678,
+              "load_ms": 0.0,
+              "decode_ms": 40.41479399893433,
+              "inference_ms": 2218.415784998797,
+              "postprocess_ms": 0.002649998350534588
+            },
+            "reported_pipeline_rtf": 0.07538696809982261,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          }
+        ],
+        "job_timing_interpretation": "created is after upload/hash; started is _run_job entry. With prefetch on, normalization precedes started, so processing-after-started and pipeline total exclude prefetched decoding. Batch wall and end-to-end include it; overlapping stages must not be summed.",
+        "model_loaded_events": [
+          {
+            "ts": "2026-10-25T01:33:25.302803Z",
+            "job_id": "job_c0574533b99440c6b00c4896c8dcfa45",
+            "model_id": "qwen3-asr-0.6b",
+            "duration_ms": 3603.2203150025452
+          }
+        ],
+        "inference_interval_source": "actual parent-worker transcription RPC envelope elapsed time",
+        "interval_interpretation": "UTC completion timestamp minus monotonic RPC duration; contains IPC and scheduling, not CUDA kernel timing",
+        "inference_intervals": [
+          {
+            "job_id": "job_c0574533b99440c6b00c4896c8dcfa45",
+            "start_utc_seconds": 1792892005.3034582,
+            "end_utc_seconds": 1792892009.24696,
+            "rpc_duration_seconds": 3.943501767993439,
+            "worker_pid": 7866,
+            "rpc_request_id": 3
+          },
+          {
+            "job_id": "job_27cf1cf1a87b48a29401dc985be1ec92",
+            "start_utc_seconds": 1792892009.2909014,
+            "end_utc_seconds": 1792892011.481456,
+            "rpc_duration_seconds": 2.190554684995732,
+            "worker_pid": 7866,
+            "rpc_request_id": 4
+          },
+          {
+            "job_id": "job_e93fba5d91ea42c7aca6bf3b6a98bf5e",
+            "start_utc_seconds": 1792892011.5263934,
+            "end_utc_seconds": 1792892013.746452,
+            "rpc_duration_seconds": 2.2200585789978504,
+            "worker_pid": 7866,
+            "rpc_request_id": 5
+          }
+        ],
+        "inter_call_gap_proxy_seconds": [
+          0.043941497802734375,
+          0.0449373722076416
+        ],
+        "inter_call_gap_proxy_total_seconds": 0.08887887001037598,
+        "inter_call_gap_proxy_max_seconds": 0.0449373722076416,
+        "texts": [
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          }
+        ],
+        "dropped_log_events": 0,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "httpx": "0.28.1"
+        },
+        "python": "3.12.13"
+      },
+      {
+        "run": "on-02",
+        "mode": "real-offline",
+        "prefetch": true,
+        "batch_jobs": 3,
+        "batch_wall_seconds": 12.090351368999109,
+        "batch_rtf_end_to_end": 0.13433723743332343,
+        "batch_throughput_audio_seconds_per_wall_second": 7.443952392547429,
+        "model_state": "fresh model and gateway process; disk inputs explicitly warmed",
+        "cache_warm": {
+          "files_read": 7,
+          "bytes_read": 1577321867,
+          "wall_seconds": 0.21122903400100768,
+          "scope": "existing fixed-revision weights/tokenizer plus audio; no download"
+        },
+        "parameters": {
+          "model": "qwen3-asr-0.6b",
+          "language": "zh",
+          "quality_profile": "legacy",
+          "timestamps": "none",
+          "response_format": "verbose_json",
+          "max_new_tokens": "4096",
+          "split_strategy": "auto"
+        },
+        "model_identity": {
+          "model": "qwen3-asr-0.6b",
+          "revision": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
+          "repository": "Qwen/Qwen3-ASR-0.6B-hf",
+          "engine_id": "qwen",
+          "pipeline_version": "qwen-v1",
+          "engine_version": "1",
+          "default_pipeline": "legacy",
+          "audio_spec": {
+            "sample_rate": 16000,
+            "channels": 1,
+            "sample_width": 2
+          },
+          "runtime_profile_id": "managed-python"
+        },
+        "submitted_order": [
+          "job_a9239cb5678c49e2ae578c96ce2ca0cf",
+          "job_0001f04f79c34141ba6f9cec865a7d6a",
+          "job_d40c566b9c0d4fc4a0678ee37c4007cf"
+        ],
+        "started_order": [
+          "job_a9239cb5678c49e2ae578c96ce2ca0cf",
+          "job_0001f04f79c34141ba6f9cec865a7d6a",
+          "job_d40c566b9c0d4fc4a0678ee37c4007cf"
+        ],
+        "sequences": [
+          1,
+          2,
+          3
+        ],
+        "phases": {
+          "job_a9239cb5678c49e2ae578c96ce2ca0cf": [
+            "queued",
+            "loading_model",
+            "transcribing",
+            "completed"
+          ],
+          "job_0001f04f79c34141ba6f9cec865a7d6a": [
+            "queued",
+            "transcribing",
+            "completed"
+          ],
+          "job_d40c566b9c0d4fc4a0678ee37c4007cf": [
+            "queued",
+            "transcribing",
+            "completed"
+          ]
+        },
+        "normalization_calls_by_job": {
+          "job_a9239cb5678c49e2ae578c96ce2ca0cf": 1,
+          "job_0001f04f79c34141ba6f9cec865a7d6a": 1,
+          "job_d40c566b9c0d4fc4a0678ee37c4007cf": 1
+        },
+        "model_loads": 1,
+        "worker_pid": 8064,
+        "worker_reaped": true,
+        "temporary_quota_after": 0,
+        "jobs": [
+          {
+            "job_id": "job_a9239cb5678c49e2ae578c96ce2ca0cf",
+            "batch_index": 1,
+            "created_at": "2026-10-25T01:33:37.084547Z",
+            "started_at": "2026-10-25T01:33:37.412542Z",
+            "completed_at": "2026-10-25T01:33:45.558784Z",
+            "queue_and_prepare_before_started_seconds": 0.32799506187438965,
+            "processing_after_started_seconds": 8.146241903305054,
+            "end_to_end_since_created_seconds": 8.474236965179443,
+            "rtf_processing_after_started": 0.27154139677683514,
+            "rtf_end_to_end_since_created": 0.28247456550598143,
+            "result_timings": {
+              "total_ms": 8123.740672002896,
+              "load_ms": 3712.0074369959184,
+              "decode_ms": 0.0,
+              "inference_ms": 4408.183191000717,
+              "postprocess_ms": 0.0038099969970062375
+            },
+            "reported_pipeline_rtf": 0.2707913557334299,
+            "cold_model_load": true,
+            "model_loaded_events": [
+              {
+                "ts": "2026-10-25T01:33:41.145471Z",
+                "job_id": "job_a9239cb5678c49e2ae578c96ce2ca0cf",
+                "model_id": "qwen3-asr-0.6b",
+                "duration_ms": 3712.0074369959184
+              }
+            ]
+          },
+          {
+            "job_id": "job_0001f04f79c34141ba6f9cec865a7d6a",
+            "batch_index": 2,
+            "created_at": "2026-10-25T01:33:37.185016Z",
+            "started_at": "2026-10-25T01:33:45.558970Z",
+            "completed_at": "2026-10-25T01:33:47.287848Z",
+            "queue_and_prepare_before_started_seconds": 8.373954057693481,
+            "processing_after_started_seconds": 1.7288780212402344,
+            "end_to_end_since_created_seconds": 10.102832078933716,
+            "rtf_processing_after_started": 0.05762926737467448,
+            "rtf_end_to_end_since_created": 0.33676106929779054,
+            "result_timings": {
+              "total_ms": 1723.5410939974827,
+              "load_ms": 0.0,
+              "decode_ms": 0.0,
+              "inference_ms": 1720.5707440007245,
+              "postprocess_ms": 0.0027600035537034273
+            },
+            "reported_pipeline_rtf": 0.05745136979991609,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          },
+          {
+            "job_id": "job_d40c566b9c0d4fc4a0678ee37c4007cf",
+            "batch_index": 3,
+            "created_at": "2026-10-25T01:33:37.349620Z",
+            "started_at": "2026-10-25T01:33:47.287963Z",
+            "completed_at": "2026-10-25T01:33:49.116863Z",
+            "queue_and_prepare_before_started_seconds": 9.938342809677124,
+            "processing_after_started_seconds": 1.8289000988006592,
+            "end_to_end_since_created_seconds": 11.767242908477783,
+            "rtf_processing_after_started": 0.06096333662668864,
+            "rtf_end_to_end_since_created": 0.3922414302825928,
+            "result_timings": {
+              "total_ms": 1825.3744130051928,
+              "load_ms": 0.0,
+              "decode_ms": 0.0,
+              "inference_ms": 1822.7078529962455,
+              "postprocess_ms": 0.002130000211764127
+            },
+            "reported_pipeline_rtf": 0.06084581376683976,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          }
+        ],
+        "job_timing_interpretation": "created is after upload/hash; started is _run_job entry. With prefetch on, normalization precedes started, so processing-after-started and pipeline total exclude prefetched decoding. Batch wall and end-to-end include it; overlapping stages must not be summed.",
+        "model_loaded_events": [
+          {
+            "ts": "2026-10-25T01:33:41.145471Z",
+            "job_id": "job_a9239cb5678c49e2ae578c96ce2ca0cf",
+            "model_id": "qwen3-asr-0.6b",
+            "duration_ms": 3712.0074369959184
+          }
+        ],
+        "inference_interval_source": "actual parent-worker transcription RPC envelope elapsed time",
+        "interval_interpretation": "UTC completion timestamp minus monotonic RPC duration; contains IPC and scheduling, not CUDA kernel timing",
+        "inference_intervals": [
+          {
+            "job_id": "job_a9239cb5678c49e2ae578c96ce2ca0cf",
+            "start_utc_seconds": 1792892021.1461127,
+            "end_utc_seconds": 1792892025.556448,
+            "rpc_duration_seconds": 4.410335277003469,
+            "worker_pid": 8064,
+            "rpc_request_id": 3
+          },
+          {
+            "job_id": "job_0001f04f79c34141ba6f9cec865a7d6a",
+            "start_utc_seconds": 1792892025.5634296,
+            "end_utc_seconds": 1792892027.285599,
+            "rpc_duration_seconds": 1.722169346998271,
+            "worker_pid": 8064,
+            "rpc_request_id": 4
+          },
+          {
+            "job_id": "job_d40c566b9c0d4fc4a0678ee37c4007cf",
+            "start_utc_seconds": 1792892027.290644,
+            "end_utc_seconds": 1792892029.114827,
+            "rpc_duration_seconds": 1.824183101001836,
+            "worker_pid": 8064,
+            "rpc_request_id": 5
+          }
+        ],
+        "inter_call_gap_proxy_seconds": [
+          0.006981611251831055,
+          0.0050449371337890625
+        ],
+        "inter_call_gap_proxy_total_seconds": 0.012026548385620117,
+        "inter_call_gap_proxy_max_seconds": 0.006981611251831055,
+        "texts": [
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          }
+        ],
+        "dropped_log_events": 0,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "httpx": "0.28.1"
+        },
+        "python": "3.12.13"
+      },
+      {
+        "run": "off-03",
+        "mode": "real-offline",
+        "prefetch": false,
+        "batch_jobs": 3,
+        "batch_wall_seconds": 12.810237944999244,
+        "batch_rtf_end_to_end": 0.14233597716665827,
+        "batch_throughput_audio_seconds_per_wall_second": 7.025630623444701,
+        "model_state": "fresh model and gateway process; disk inputs explicitly warmed",
+        "cache_warm": {
+          "files_read": 7,
+          "bytes_read": 1577321867,
+          "wall_seconds": 0.05340072599938139,
+          "scope": "existing fixed-revision weights/tokenizer plus audio; no download"
+        },
+        "parameters": {
+          "model": "qwen3-asr-0.6b",
+          "language": "zh",
+          "quality_profile": "legacy",
+          "timestamps": "none",
+          "response_format": "verbose_json",
+          "max_new_tokens": "4096",
+          "split_strategy": "auto"
+        },
+        "model_identity": {
+          "model": "qwen3-asr-0.6b",
+          "revision": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
+          "repository": "Qwen/Qwen3-ASR-0.6B-hf",
+          "engine_id": "qwen",
+          "pipeline_version": "qwen-v1",
+          "engine_version": "1",
+          "default_pipeline": "legacy",
+          "audio_spec": {
+            "sample_rate": 16000,
+            "channels": 1,
+            "sample_width": 2
+          },
+          "runtime_profile_id": "managed-python"
+        },
+        "submitted_order": [
+          "job_4e7a6803e6d24b43b7d766a7bb972d5f",
+          "job_c1eb2ac15c2d457c826dbd9596b34987",
+          "job_57c283e3d6c0431b91c58ea0c4fe9442"
+        ],
+        "started_order": [
+          "job_4e7a6803e6d24b43b7d766a7bb972d5f",
+          "job_c1eb2ac15c2d457c826dbd9596b34987",
+          "job_57c283e3d6c0431b91c58ea0c4fe9442"
+        ],
+        "sequences": [
+          1,
+          2,
+          3
+        ],
+        "phases": {
+          "job_4e7a6803e6d24b43b7d766a7bb972d5f": [
+            "preprocessing",
+            "loading_model",
+            "transcribing",
+            "completed"
+          ],
+          "job_c1eb2ac15c2d457c826dbd9596b34987": [
+            "queued",
+            "preprocessing",
+            "transcribing",
+            "completed"
+          ],
+          "job_57c283e3d6c0431b91c58ea0c4fe9442": [
+            "queued",
+            "preprocessing",
+            "transcribing",
+            "completed"
+          ]
+        },
+        "normalization_calls_by_job": {
+          "job_4e7a6803e6d24b43b7d766a7bb972d5f": 1,
+          "job_c1eb2ac15c2d457c826dbd9596b34987": 1,
+          "job_57c283e3d6c0431b91c58ea0c4fe9442": 1
+        },
+        "model_loads": 1,
+        "worker_pid": 8253,
+        "worker_reaped": true,
+        "temporary_quota_after": 0,
+        "jobs": [
+          {
+            "job_id": "job_4e7a6803e6d24b43b7d766a7bb972d5f",
+            "batch_index": 1,
+            "created_at": "2026-10-25T01:33:51.944731Z",
+            "started_at": "2026-10-25T01:33:52.143801Z",
+            "completed_at": "2026-10-25T01:33:59.779082Z",
+            "queue_and_prepare_before_started_seconds": 0.19906997680664062,
+            "processing_after_started_seconds": 7.635281085968018,
+            "end_to_end_since_created_seconds": 7.834351062774658,
+            "rtf_processing_after_started": 0.25450936953226727,
+            "rtf_end_to_end_since_created": 0.26114503542582196,
+            "result_timings": {
+              "total_ms": 7612.692002003314,
+              "load_ms": 3652.4610740016215,
+              "decode_ms": 88.82989700214239,
+              "inference_ms": 3868.3483509958023,
+              "postprocess_ms": 0.0030999945010989904
+            },
+            "reported_pipeline_rtf": 0.25375640006677713,
+            "cold_model_load": true,
+            "model_loaded_events": [
+              {
+                "ts": "2026-10-25T01:33:55.906415Z",
+                "job_id": "job_4e7a6803e6d24b43b7d766a7bb972d5f",
+                "model_id": "qwen3-asr-0.6b",
+                "duration_ms": 3652.4610740016215
+              }
+            ]
+          },
+          {
+            "job_id": "job_c1eb2ac15c2d457c826dbd9596b34987",
+            "batch_index": 2,
+            "created_at": "2026-10-25T01:33:52.147332Z",
+            "started_at": "2026-10-25T01:33:59.779256Z",
+            "completed_at": "2026-10-25T01:34:02.393049Z",
+            "queue_and_prepare_before_started_seconds": 7.631924152374268,
+            "processing_after_started_seconds": 2.613792896270752,
+            "end_to_end_since_created_seconds": 10.24571704864502,
+            "rtf_processing_after_started": 0.08712642987569173,
+            "rtf_end_to_end_since_created": 0.34152390162150065,
+            "result_timings": {
+              "total_ms": 2610.3090940014226,
+              "load_ms": 0.0,
+              "decode_ms": 41.54099299921654,
+              "inference_ms": 2566.0172999996576,
+              "postprocess_ms": 0.0024999972083605826
+            },
+            "reported_pipeline_rtf": 0.08701030313338075,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          },
+          {
+            "job_id": "job_57c283e3d6c0431b91c58ea0c4fe9442",
+            "batch_index": 3,
+            "created_at": "2026-10-25T01:33:52.176571Z",
+            "started_at": "2026-10-25T01:34:02.393164Z",
+            "completed_at": "2026-10-25T01:34:04.697106Z",
+            "queue_and_prepare_before_started_seconds": 10.216593027114868,
+            "processing_after_started_seconds": 2.3039419651031494,
+            "end_to_end_since_created_seconds": 12.520534992218018,
+            "rtf_processing_after_started": 0.07679806550343832,
+            "rtf_end_to_end_since_created": 0.41735116640726727,
+            "result_timings": {
+              "total_ms": 2300.7845199972508,
+              "load_ms": 0.0,
+              "decode_ms": 42.50488799880259,
+              "inference_ms": 2255.599962998531,
+              "postprocess_ms": 0.002130000211764127
+            },
+            "reported_pipeline_rtf": 0.0766928173332417,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          }
+        ],
+        "job_timing_interpretation": "created is after upload/hash; started is _run_job entry. With prefetch on, normalization precedes started, so processing-after-started and pipeline total exclude prefetched decoding. Batch wall and end-to-end include it; overlapping stages must not be summed.",
+        "model_loaded_events": [
+          {
+            "ts": "2026-10-25T01:33:55.906415Z",
+            "job_id": "job_4e7a6803e6d24b43b7d766a7bb972d5f",
+            "model_id": "qwen3-asr-0.6b",
+            "duration_ms": 3652.4610740016215
+          }
+        ],
+        "inference_interval_source": "actual parent-worker transcription RPC envelope elapsed time",
+        "interval_interpretation": "UTC completion timestamp minus monotonic RPC duration; contains IPC and scheduling, not CUDA kernel timing",
+        "inference_intervals": [
+          {
+            "job_id": "job_4e7a6803e6d24b43b7d766a7bb972d5f",
+            "start_utc_seconds": 1792892035.9070342,
+            "end_utc_seconds": 1792892039.777048,
+            "rpc_duration_seconds": 3.870013953994203,
+            "worker_pid": 8253,
+            "rpc_request_id": 3
+          },
+          {
+            "job_id": "job_c1eb2ac15c2d457c826dbd9596b34987",
+            "start_utc_seconds": 1792892039.8236403,
+            "end_utc_seconds": 1792892042.391208,
+            "rpc_duration_seconds": 2.567567580001196,
+            "worker_pid": 8253,
+            "rpc_request_id": 4
+          },
+          {
+            "job_id": "job_57c283e3d6c0431b91c58ea0c4fe9442",
+            "start_utc_seconds": 1792892042.4382126,
+            "end_utc_seconds": 1792892044.695201,
+            "rpc_duration_seconds": 2.2569881890012766,
+            "worker_pid": 8253,
+            "rpc_request_id": 5
+          }
+        ],
+        "inter_call_gap_proxy_seconds": [
+          0.04659223556518555,
+          0.04700469970703125
+        ],
+        "inter_call_gap_proxy_total_seconds": 0.0935969352722168,
+        "inter_call_gap_proxy_max_seconds": 0.04700469970703125,
+        "texts": [
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          }
+        ],
+        "dropped_log_events": 0,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "httpx": "0.28.1"
+        },
+        "python": "3.12.13"
+      },
+      {
+        "run": "on-03",
+        "mode": "real-offline",
+        "prefetch": true,
+        "batch_jobs": 3,
+        "batch_wall_seconds": 13.738006583000242,
+        "batch_rtf_end_to_end": 0.15264451758889158,
+        "batch_throughput_audio_seconds_per_wall_second": 6.551168792666636,
+        "model_state": "fresh model and gateway process; disk inputs explicitly warmed",
+        "cache_warm": {
+          "files_read": 7,
+          "bytes_read": 1577321867,
+          "wall_seconds": 0.10657889200228965,
+          "scope": "existing fixed-revision weights/tokenizer plus audio; no download"
+        },
+        "parameters": {
+          "model": "qwen3-asr-0.6b",
+          "language": "zh",
+          "quality_profile": "legacy",
+          "timestamps": "none",
+          "response_format": "verbose_json",
+          "max_new_tokens": "4096",
+          "split_strategy": "auto"
+        },
+        "model_identity": {
+          "model": "qwen3-asr-0.6b",
+          "revision": "6aa69c382e2b426eee1f5870d4c95859a74b6445",
+          "repository": "Qwen/Qwen3-ASR-0.6B-hf",
+          "engine_id": "qwen",
+          "pipeline_version": "qwen-v1",
+          "engine_version": "1",
+          "default_pipeline": "legacy",
+          "audio_spec": {
+            "sample_rate": 16000,
+            "channels": 1,
+            "sample_width": 2
+          },
+          "runtime_profile_id": "managed-python"
+        },
+        "submitted_order": [
+          "job_e751bf2e0dc849ed8c4a60fdf80c29e4",
+          "job_be856056fb634187bd0eb39ffa61473e",
+          "job_782a9b1cda254d42a0fbdd5a34c11bc3"
+        ],
+        "started_order": [
+          "job_e751bf2e0dc849ed8c4a60fdf80c29e4",
+          "job_be856056fb634187bd0eb39ffa61473e",
+          "job_782a9b1cda254d42a0fbdd5a34c11bc3"
+        ],
+        "sequences": [
+          1,
+          2,
+          3
+        ],
+        "phases": {
+          "job_e751bf2e0dc849ed8c4a60fdf80c29e4": [
+            "queued",
+            "loading_model",
+            "transcribing",
+            "completed"
+          ],
+          "job_be856056fb634187bd0eb39ffa61473e": [
+            "queued",
+            "transcribing",
+            "completed"
+          ],
+          "job_782a9b1cda254d42a0fbdd5a34c11bc3": [
+            "queued",
+            "transcribing",
+            "completed"
+          ]
+        },
+        "normalization_calls_by_job": {
+          "job_e751bf2e0dc849ed8c4a60fdf80c29e4": 1,
+          "job_be856056fb634187bd0eb39ffa61473e": 1,
+          "job_782a9b1cda254d42a0fbdd5a34c11bc3": 1
+        },
+        "model_loads": 1,
+        "worker_pid": 8452,
+        "worker_reaped": true,
+        "temporary_quota_after": 0,
+        "jobs": [
+          {
+            "job_id": "job_e751bf2e0dc849ed8c4a60fdf80c29e4",
+            "batch_index": 1,
+            "created_at": "2026-10-25T01:34:07.756757Z",
+            "started_at": "2026-10-25T01:34:08.057057Z",
+            "completed_at": "2026-10-25T01:34:16.769081Z",
+            "queue_and_prepare_before_started_seconds": 0.30029988288879395,
+            "processing_after_started_seconds": 8.712024211883545,
+            "end_to_end_since_created_seconds": 9.012324094772339,
+            "rtf_processing_after_started": 0.2904008070627848,
+            "rtf_end_to_end_since_created": 0.300410803159078,
+            "result_timings": {
+              "total_ms": 8692.232150002383,
+              "load_ms": 3758.7028890047804,
+              "decode_ms": 0.0,
+              "inference_ms": 4929.486803994223,
+              "postprocess_ms": 0.003910994564648718
+            },
+            "reported_pipeline_rtf": 0.28974107166674606,
+            "cold_model_load": true,
+            "model_loaded_events": [
+              {
+                "ts": "2026-10-25T01:34:11.833893Z",
+                "job_id": "job_e751bf2e0dc849ed8c4a60fdf80c29e4",
+                "model_id": "qwen3-asr-0.6b",
+                "duration_ms": 3758.7028890047804
+              }
+            ]
+          },
+          {
+            "job_id": "job_be856056fb634187bd0eb39ffa61473e",
+            "batch_index": 2,
+            "created_at": "2026-10-25T01:34:07.955060Z",
+            "started_at": "2026-10-25T01:34:16.769230Z",
+            "completed_at": "2026-10-25T01:34:18.904375Z",
+            "queue_and_prepare_before_started_seconds": 8.814169883728027,
+            "processing_after_started_seconds": 2.1351451873779297,
+            "end_to_end_since_created_seconds": 10.949315071105957,
+            "rtf_processing_after_started": 0.071171506245931,
+            "rtf_end_to_end_since_created": 0.3649771690368652,
+            "result_timings": {
+              "total_ms": 2129.9969839965343,
+              "load_ms": 0.0,
+              "decode_ms": 0.0,
+              "inference_ms": 2127.553340003942,
+              "postprocess_ms": 0.003240005753468722
+            },
+            "reported_pipeline_rtf": 0.07099989946655114,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          },
+          {
+            "job_id": "job_782a9b1cda254d42a0fbdd5a34c11bc3",
+            "batch_index": 3,
+            "created_at": "2026-10-25T01:34:07.978149Z",
+            "started_at": "2026-10-25T01:34:18.904503Z",
+            "completed_at": "2026-10-25T01:34:21.433851Z",
+            "queue_and_prepare_before_started_seconds": 10.926354169845581,
+            "processing_after_started_seconds": 2.5293478965759277,
+            "end_to_end_since_created_seconds": 13.455702066421509,
+            "rtf_processing_after_started": 0.08431159655253093,
+            "rtf_end_to_end_since_created": 0.4485234022140503,
+            "result_timings": {
+              "total_ms": 2526.1969130006037,
+              "load_ms": 0.0,
+              "decode_ms": 0.0,
+              "inference_ms": 2523.6084749994916,
+              "postprocess_ms": 0.0022899985197000206
+            },
+            "reported_pipeline_rtf": 0.0842065637666868,
+            "cold_model_load": false,
+            "model_loaded_events": []
+          }
+        ],
+        "job_timing_interpretation": "created is after upload/hash; started is _run_job entry. With prefetch on, normalization precedes started, so processing-after-started and pipeline total exclude prefetched decoding. Batch wall and end-to-end include it; overlapping stages must not be summed.",
+        "model_loaded_events": [
+          {
+            "ts": "2026-10-25T01:34:11.833893Z",
+            "job_id": "job_e751bf2e0dc849ed8c4a60fdf80c29e4",
+            "model_id": "qwen3-asr-0.6b",
+            "duration_ms": 3758.7028890047804
+          }
+        ],
+        "inference_interval_source": "actual parent-worker transcription RPC envelope elapsed time",
+        "interval_interpretation": "UTC completion timestamp minus monotonic RPC duration; contains IPC and scheduling, not CUDA kernel timing",
+        "inference_intervals": [
+          {
+            "job_id": "job_e751bf2e0dc849ed8c4a60fdf80c29e4",
+            "start_utc_seconds": 1792892051.83471,
+            "end_utc_seconds": 1792892056.766632,
+            "rpc_duration_seconds": 4.93192214800365,
+            "worker_pid": 8452,
+            "rpc_request_id": 3
+          },
+          {
+            "job_id": "job_be856056fb634187bd0eb39ffa61473e",
+            "start_utc_seconds": 1792892056.7735894,
+            "end_utc_seconds": 1792892058.902488,
+            "rpc_duration_seconds": 2.128898504997778,
+            "worker_pid": 8452,
+            "rpc_request_id": 4
+          },
+          {
+            "job_id": "job_782a9b1cda254d42a0fbdd5a34c11bc3",
+            "start_utc_seconds": 1792892058.9070115,
+            "end_utc_seconds": 1792892061.431999,
+            "rpc_duration_seconds": 2.5249873409993597,
+            "worker_pid": 8452,
+            "rpc_request_id": 5
+          }
+        ],
+        "inter_call_gap_proxy_seconds": [
+          0.006957292556762695,
+          0.004523515701293945
+        ],
+        "inter_call_gap_proxy_total_seconds": 0.01148080825805664,
+        "inter_call_gap_proxy_max_seconds": 0.006957292556762695,
+        "texts": [
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          },
+          {
+            "sha256": "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b",
+            "characters": 131
+          }
+        ],
+        "dropped_log_events": 0,
+        "versions": {
+          "torch": "2.11.0+cu128",
+          "transformers": "5.18.0.dev0",
+          "fastapi": "0.138.1",
+          "starlette": "1.3.1",
+          "httpx": "0.28.1"
+        },
+        "python": "3.12.13"
+      }
+    ],
+    "scope": "same frozen audio/parameters, three FIFO legacy jobs per fresh app; no sockets or deployment",
+    "gap_interpretation": "transcription RPC envelope gap proxy includes IPC and scheduler; it is not GPU kernel idle",
+    "aggregates": {
+      "off": {
+        "batch_wall_seconds": {
+          "median": 12.810237944999244,
+          "min": 12.408170417998917,
+          "max": 14.960898061006446
+        },
+        "batch_rtf_end_to_end": {
+          "median": 0.14233597716665827,
+          "min": 0.13786856019998797,
+          "max": 0.1662322006778494
+        },
+        "inter_call_gap_proxy_total_seconds": {
+          "median": 0.09345245361328125,
+          "min": 0.08887887001037598,
+          "max": 0.0935969352722168
+        }
+      },
+      "on": {
+        "batch_wall_seconds": {
+          "median": 12.125566681999771,
+          "min": 12.090351368999109,
+          "max": 13.738006583000242
+        },
+        "batch_rtf_end_to_end": {
+          "median": 0.13472851868888636,
+          "min": 0.13433723743332343,
+          "max": 0.15264451758889158
+        },
+        "inter_call_gap_proxy_total_seconds": {
+          "median": 0.012026548385620117,
+          "min": 0.01148080825805664,
+          "max": 0.012510538101196289
+        }
+      }
+    },
+    "median_batch_change_percent": -5.344719324801838,
+    "text_digests": [
+      "337e50d0a58c4917d190a956a4db4a7ac8301f36cea002bc590f122b71fd067b"
+    ],
+    "text_equivalent_across_all_jobs": true,
+    "source_unchanged": true,
+    "interpretation": "three samples per mode; compare median and ranges, source/text identity and gap proxy before attributing a benefit"
+  },
+  "production_check": {
+    "before_service": "ActiveState=active\nMainPID=211\nWorkingDirectory=/home/fragt/services/asr-server\n",
+    "after_service": "ActiveState=active\nMainPID=211\nWorkingDirectory=/home/fragt/services/asr-server\n",
+    "same_service_state": true,
+    "health": {
+      "status": 200
+    },
+    "models_http_status": 200,
+    "models": [
+      {
+        "id": "qwen3-asr-1.7b",
+        "status": "unloaded",
+        "active_requests": 0
+      },
+      {
+        "id": "qwen3-asr-0.6b",
+        "status": "unloaded",
+        "active_requests": 0
+      },
+      {
+        "id": "moss-transcribe-diarize-0.9b",
+        "status": "unloaded",
+        "active_requests": 0
+      }
+    ],
+    "torch_version_unchanged": true,
+    "transformers_version_unchanged": true,
+    "selected_source_sha256_unchanged": true
+  },
+  "raw_evidence_archive_sha256": "6f38f636a80eb7435157f7f150f46a00fdca6234af0bbf35d0a0ba3476c90235",
+  "final_resource_check": {
+    "scope": "SSH read-only proc and nvidia-smi check after postflight process exited",
+    "owned_test_python_pids": [],
+    "gpu_memory_mib": 1283,
+    "compute_pids": [],
+    "media_policy_scratch_removed": true
+  }
+}

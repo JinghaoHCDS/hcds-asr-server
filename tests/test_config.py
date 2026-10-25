@@ -32,45 +32,14 @@ def test_load_settings_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     assert settings.max_upload_mb == 4
 
 
-def test_invalid_adapter_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ASR_ADAPTER", "cpu")
-
-    with pytest.raises(ValueError, match="ASR_ADAPTER"):
-        load_settings()
-
-
-def test_invalid_enable_moss_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ASR_ENABLE_MOSS", "maybe")
-
-    with pytest.raises(ValueError, match="ASR_ENABLE_MOSS"):
-        load_settings()
-
-
-def test_invalid_qwen_batch_size_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ASR_QWEN_BATCH_SIZE", "0")
-
-    with pytest.raises(ValueError, match="ASR_QWEN_BATCH_SIZE"):
-        load_settings()
-
-
-def test_invalid_max_queued_jobs_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ASR_MAX_QUEUED_JOBS", "0")
-
-    with pytest.raises(ValueError, match="ASR_MAX_QUEUED_JOBS"):
-        load_settings()
-
-
-def test_invalid_idle_unload_seconds_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ASR_IDLE_UNLOAD_SECONDS", "-1")
-
-    with pytest.raises(ValueError, match="ASR_IDLE_UNLOAD_SECONDS"):
-        load_settings()
-
-
-def test_invalid_max_upload_mb_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ASR_MAX_UPLOAD_MB", "0")
-
-    with pytest.raises(ValueError, match="ASR_MAX_UPLOAD_MB"):
+@pytest.mark.parametrize(("setting", "value"), [
+    ("ASR_ADAPTER", "cpu"), ("ASR_ENABLE_MOSS", "maybe"),
+    ("ASR_QWEN_BATCH_SIZE", "0"), ("ASR_MAX_QUEUED_JOBS", "0"),
+    ("ASR_IDLE_UNLOAD_SECONDS", "-1"), ("ASR_MAX_UPLOAD_MB", "0"),
+])
+def test_invalid_environment_value_identifies_setting(monkeypatch: pytest.MonkeyPatch, setting: str, value: str) -> None:
+    monkeypatch.setenv(setting, value)
+    with pytest.raises(ValueError, match=setting):
         load_settings()
 
 

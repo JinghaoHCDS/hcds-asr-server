@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, clock, date, errorNames, message, phaseName, terminal, type Issue, type Job, type Segment } from './api';
+import { api, clock, date, errorNames, jobDetail, message, phaseName, terminal, type Issue, type Job, type ModelOption, type Segment } from './api';
 import { Icon } from './icons';
 
 function issueText(issue: Issue | string) {
@@ -11,15 +11,44 @@ function issueText(issue: Issue | string) {
 }
 function isNear(issue: Issue, segment: Segment) { return issue.start !== undefined ? issue.start <= segment.end && (issue.end ?? issue.start) >= segment.start : issue.chunk_index === segment.index; }
 
-export default function ResultPane({ jobId, onBack, onChanged }: { jobId: string; onBack: () => void; onChanged: () => void }) {
+export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId: string; models: ModelOption[]; onBack: () => void; onChanged: () => void }) {
   const [job, setJob] = useState<Job | null>(null); const [error, setError] = useState(''); const [raw, setRaw] = useState(false);
   const [edit, setEdit] = useState<Segment | null>(null); const [editBaseVersion, setEditBaseVersion] = useState(1); const [draft, setDraft] = useState(''); const [saving, setSaving] = useState(false);
   const [position, setPosition] = useState(0); const [exportVersion, setExportVersion] = useState<number | null>(null);
   const [format, setFormat] = useState('txt'); const [exporting, setExporting] = useState(false); const [notice, setNotice] = useState('');
   const [audioError, setAudioError] = useState(false); const audio = useRef<HTMLAudioElement>(null);
+  const etag = useRef<{ id: string; value?: string }>({ id: jobId });
+  const selectedId = useRef(jobId); selectedId.current = jobId;
+  const capabilities = models.find(model => model.id === job?.model)?.capabilities;
+  const canEdit = !!capabilities?.forced_alignment;
+  const canSubtitle = !!(capabilities?.forced_alignment || capabilities?.segment_timestamps);
+  useEffect(() => { if (!canSubtitle) setFormat('txt'); }, [canSubtitle]);
 
-  const load = useCallback(async () => { try { const next = await api<Job>(`/jobs/${jobId}`); setJob(next); setError(''); } catch (e) { setError(message(e)); } }, [jobId]);
-  useEffect(() => { void load(); const interval = window.setInterval(() => void load(), 3500); return () => window.clearInterval(interval); }, [load]);
+  const load = useCallback(async () => {
+    try {
+      const next = await jobDetail(jobId, etag.current.id === jobId ? etag.current.value : undefined);
+      if (selectedId.current !== jobId) return;
+      etag.current = { id: jobId, value: next.etag };
+      if (next.job) setJob(next.job);
+      setError('');
+    } catch (e) { if (selectedId.current === jobId) setError(message(e)); }
+  }, [jobId]);
+  useEffect(() => {
+    etag.current = { id: jobId }; setJob(null); setAudioError(false); void load();
+  }, [jobId, load]);
+  const pending = !!job && (!terminal(job.status) || job.result?.alignment_status === 'pending');
+  useEffect(() => {
+    if (!pending) return;
+    let alive = true; let timer: number;
+    const poll = async () => {
+      if (document.visibilityState === 'visible') await load();
+      if (alive) timer = window.setTimeout(() => void poll(), document.visibilityState === 'hidden' ? 30000 : 3500);
+    };
+    const visible = () => { if (document.visibilityState === 'visible') void load(); };
+    timer = window.setTimeout(() => void poll(), 3500);
+    document.addEventListener('visibilitychange', visible);
+    return () => { alive = false; window.clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
+  }, [pending, load]);
   useEffect(() => { if (job?.result?.version !== undefined) setExportVersion(job.result.version); }, [job?.result?.version]);
 
   function seek(seconds: number) { if (audio.current) { audio.current.currentTime = seconds; void audio.current.play().catch(() => setNotice('请点击播放器的播放按钮回听。')); } }
@@ -29,7 +58,7 @@ export default function ResultPane({ jobId, onBack, onChanged }: { jobId: string
     setSaving(true); setError('');
     try {
       const next = await api<Job>(`/jobs/${jobId}/segments/${encodeURIComponent(edit.id)}`, { method: 'PATCH', body: JSON.stringify({ text: draft.trim(), base_version: editBaseVersion }) });
-      setJob(next); setEdit(null); setNotice('文字已保存，正在更新受影响片段的字幕。'); onChanged();
+      etag.current = { id: jobId }; setJob(next); setEdit(null); setNotice('文字已保存，正在更新受影响片段的字幕。'); onChanged();
     } catch (e) { setError(message(e)); } finally { setSaving(false); }
   }
   async function download() {
@@ -69,9 +98,9 @@ export default function ResultPane({ jobId, onBack, onChanged }: { jobId: string
         <div className="transcript-help"><Icon name="play" size={14} /><span>{raw ? '模型原稿保留识别结果，可与规范后的交付稿对照。' : '点击文字回听原音，将鼠标移到片段右侧即可修改文字。'}</span></div>
         {segments.length ? <div className="transcript-segments">{segments.map((segment, i) => {
           const near = issues.some(issue => typeof issue !== 'string' && isNear(issue, segment)); const current = position >= segment.start && position < segment.end;
-          return <div key={segment.id || i} className={`transcript-segment ${current ? 'playing' : ''} ${near ? 'needs-review' : ''}`}><button className="segment-time" onClick={() => seek(segment.start)} aria-label={`回听 ${clock(segment.start)} 的片段`}>{clock(segment.start)}<Icon name="play" size={12} /></button><button className="segment-text" onClick={() => seek(segment.start)}>{raw ? segment.raw_text || segment.text : segment.text}{near && <span className="review-dot" title="此处有待复核问题" />}</button>{!raw && <button className="icon-button edit-segment" aria-label={`修改第 ${i + 1} 段文字`} onClick={() => beginEdit(segment)}><Icon name="edit" size={16} /></button>}</div>;
+          return <div key={segment.id || i} className={`transcript-segment ${current ? 'playing' : ''} ${near ? 'needs-review' : ''}`}><button className="segment-time" onClick={() => seek(segment.start)} aria-label={`回听 ${clock(segment.start)} 的片段`}>{clock(segment.start)}<Icon name="play" size={12} /></button><button className="segment-text" onClick={() => seek(segment.start)}>{raw ? segment.raw_text || segment.text : segment.text}{near && <span className="review-dot" title="此处有待复核问题" />}</button>{!raw && canEdit && <button className="icon-button edit-segment" aria-label={`修改第 ${i + 1} 段文字`} onClick={() => beginEdit(segment)}><Icon name="edit" size={16} /></button>}</div>;
         })}</div> : <div className="plain-transcript">{raw ? result.raw_text || result.text : result.text || '此素材未识别出可转录的文字。'}</div>}
-      </section></div><aside className="result-aside"><section className="panel export-panel"><div className="section-heading"><h3>导出结果</h3><Icon name="download" size={19} /></div><label className="field-label">文本版本<select value={exportVersion ?? result.version} onChange={e => setExportVersion(Number(e.target.value))}>{(result.versions?.length ? result.versions : [{ version: result.version, created_at: '', alignment_status: result.alignment_status }]).map(v => <option key={v.version} value={v.version}>v{v.version}{v.version === result.version ? ' · 当前版本' : ''}{v.alignment_status === 'pending' ? ' · 字幕更新中' : ''}</option>)}</select></label><label className="field-label">文件格式<select value={format} onChange={e => setFormat(e.target.value)}><option value="txt">TXT · 纯文本</option><option value="srt">SRT · 字幕</option><option value="vtt">VTT · 网页字幕</option><option value="json">JSON · 完整结果</option></select></label><button className="button primary wide" disabled={exporting || subtitleBlocked} onClick={() => void download()}><Icon name="download" size={17} />{exporting ? '正在导出…' : '下载所选版本'}</button>{subtitleBlocked && <p className="footnote">{versionStatus === 'failed' ? '此版本字幕对齐失败，可先导出文字或选择此前已对齐的版本。' : '字幕正在更新，可先导出文字或选择此前已对齐的版本。'}</p>}<p className="footnote">导出使用所选版本的交付稿。模型原稿可在左侧查看、复制，也保留在完整 JSON 中。</p></section>
+      </section></div><aside className="result-aside"><section className="panel export-panel"><div className="section-heading"><h3>导出结果</h3><Icon name="download" size={19} /></div><label className="field-label">文本版本<select value={exportVersion ?? result.version} onChange={e => setExportVersion(Number(e.target.value))}>{(result.versions?.length ? result.versions : [{ version: result.version, created_at: '', alignment_status: result.alignment_status }]).map(v => <option key={v.version} value={v.version}>v{v.version}{v.version === result.version ? ' · 当前版本' : ''}{v.alignment_status === 'pending' ? ' · 字幕更新中' : ''}</option>)}</select></label><label className="field-label">文件格式<select value={format} onChange={e => setFormat(e.target.value)}><option value="txt">TXT · 纯文本</option>{canSubtitle && <><option value="srt">SRT · 字幕</option><option value="vtt">VTT · 网页字幕</option></>}<option value="json">JSON · 完整结果</option></select></label><button className="button primary wide" disabled={exporting || subtitleBlocked} onClick={() => void download()}><Icon name="download" size={17} />{exporting ? '正在导出…' : '下载所选版本'}</button>{subtitleBlocked && <p className="footnote">{versionStatus === 'failed' ? '此版本字幕对齐失败，可先导出文字或选择此前已对齐的版本。' : '字幕正在更新，可先导出文字或选择此前已对齐的版本。'}</p>}<p className="footnote">导出使用所选版本的交付稿。模型原稿可在左侧查看、复制，也保留在完整 JSON 中。</p></section>
         {result.alignment_status !== 'aligned' && <div className="banner neutral"><Icon name="refresh" size={18} /><span>{result.alignment_status === 'pending' ? '字幕更新中' : '字幕暂未完成对齐'}</span></div>}
         <section className="panel review-panel"><div className="section-heading"><h3>回听清单</h3><span className="count">{issues.length}</span></div>{issues.length === 0 ? <p className="muted">系统未标记待复核问题。你仍可以回听原音进行校对。</p> : <div className="issue-list">{issues.map((issue, i) => <button className="issue-item" key={i} onClick={() => seek(typeof issue !== 'string' ? issue.start ?? 0 : 0)}><Icon name="alert" size={17} /><span><strong>{typeof issue !== 'string' && issue.start !== undefined ? clock(issue.start) : '需要确认'}</strong><small>{issueText(issue)}</small></span><Icon name="play" size={12} /></button>)}</div>}</section>
         {!!result.changes?.length && <section className="panel"><h3>词汇与修改记录</h3><p className="muted">已记录 {result.changes.length} 项调整，原始识别稿保持可对照。</p><div className="changes-list">{result.changes.map((change, i) => { const value = change as { before?: string; after?: string; original?: string; replacement?: string; from?: string; to?: string; source?: string }; const before = value.before ?? value.original ?? value.from; const after = value.after ?? value.replacement ?? value.to; return <div key={i}>{before && after ? <><span>{before}</span><Icon name="arrow" size={12} /><strong>{after}</strong></> : <span>第 {i + 1} 项修改已保存</span>}</div>; })}</div></section>}

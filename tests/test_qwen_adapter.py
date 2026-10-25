@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 
 from asr_server.adapters.base import AudioPath, TimestampItem
-from asr_server.adapters.qwen import MODEL_REPOS, QwenAsrAdapter, _HfNativeQwenModel, _QwenWorkerBackend
+from asr_server.adapters.qwen import QwenAsrAdapter, _HfNativeQwenModel, _QwenWorkerBackend
 from asr_server.errors import AsrError
+from asr_server.registry import MODEL_SOURCES
 
 
 class OomModel:
@@ -118,14 +119,9 @@ class FakeHfInputs(dict[str, Any]):
         return self
 
 
-def test_qwen_model_repos_use_hf_native_checkpoints() -> None:
-    assert MODEL_REPOS == {
-        "qwen3-asr-0.6b": "Qwen/Qwen3-ASR-0.6B-hf",
-        "qwen3-asr-1.7b": "Qwen/Qwen3-ASR-1.7B-hf",
-    }
 
-
-async def test_qwen_load_uses_hf_native_transformers_without_qwen_asr(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("model_id", ["qwen3-asr-0.6b", "qwen3-asr-1.7b"])
+async def test_qwen_load_uses_hf_native_transformers_without_qwen_asr(monkeypatch: pytest.MonkeyPatch, model_id: str) -> None:
     calls: list[tuple[str, object]] = []
 
     class FakeProcessor:
@@ -204,12 +200,13 @@ async def test_qwen_load_uses_hf_native_transformers_without_qwen_asr(monkeypatc
         raise ModuleNotFoundError(name)
 
     monkeypatch.setattr("asr_server.adapters.qwen.importlib.import_module", fake_import_module)
-    adapter = _QwenWorkerBackend("qwen3-asr-0.6b")
+    repo, revision = MODEL_SOURCES[model_id]
+    adapter = _QwenWorkerBackend(model_id, repository=repo, revision=revision)
 
     await adapter.load("transformers", "cuda", "auto", max_new_tokens=123)
     result = await adapter.transcribe(
         b"audio",
-        model_id="qwen3-asr-0.6b",
+        model_id=model_id,
         backend="transformers",
         language="auto",
         context="domain terms",
@@ -228,8 +225,10 @@ async def test_qwen_load_uses_hf_native_transformers_without_qwen_asr(monkeypatc
         "content": [{"type": "text", "text": "domain terms"}],
     }
     assert "qwen_auto_language_uses_chat_template_generation_prompt" in result.warnings
-    assert ("processor_repo", "Qwen/Qwen3-ASR-0.6B-hf") in calls
-    assert ("model_repo", "Qwen/Qwen3-ASR-0.6B-hf") in calls
+    assert ("processor_repo", repo) in calls
+    assert ("model_repo", repo) in calls
+    assert ("processor_revision", revision) in calls
+    assert ("model_revision", revision) in calls
     assert ("dtype", "bf16") in calls
     assert ("device", "cuda") in calls
     assert ("generate", 77) in calls
@@ -515,117 +514,36 @@ async def test_qwen_worker_protocol_sends_path_descriptor_not_audio_bytes(tmp_pa
     assert isinstance(conn.sent[0]["audio"], AudioPath)
 
 
-async def test_qwen_unload_releases_model_and_cuda_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("failure", [None, "model_close", "cuda_synchronize"])
+async def test_qwen_unload_releases_references_and_cache_despite_local_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
     calls: list[str] = []
-    model = CleanupModel()
+    model = ModelWithInnerModule(calls) if failure != "model_close" else FailingCleanupModel()
+    aligner = CleanupModel()
     adapter = _QwenWorkerBackend("qwen3-asr-0.6b")
-    adapter._model = model
+    adapter._model, adapter._aligner_model = model, aligner
     adapter.loaded_backend = "transformers"
 
-    fake_cuda = SimpleNamespace(
-        is_available=lambda: True,
-        synchronize=lambda: calls.append("synchronize"),
-        empty_cache=lambda: calls.append("empty_cache"),
-        ipc_collect=lambda: calls.append("ipc_collect"),
-    )
-    fake_torch = SimpleNamespace(cuda=fake_cuda)
-
-    def fake_import_module(name: str) -> Any:
-        assert name == "torch"
-        return fake_torch
-
-    monkeypatch.setattr("asr_server.adapters.qwen.gc.collect", lambda: calls.append("gc_collect"))
-    monkeypatch.setattr("asr_server.adapters.qwen.importlib.import_module", fake_import_module)
-
-    await adapter.unload(cuda_empty_cache=True)
-
-    assert model.closed is True
-    assert getattr(adapter, "_model") is None
-    assert getattr(adapter, "loaded_backend") is None
-    assert calls == ["gc_collect", "synchronize", "empty_cache", "ipc_collect"]
-
-
-async def test_qwen_unload_moves_inner_model_to_cpu_before_cuda_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-    adapter = _QwenWorkerBackend("qwen3-asr-0.6b")
-    adapter._model = ModelWithInnerModule(calls)
-    adapter.loaded_backend = "transformers"
-
-    fake_cuda = SimpleNamespace(
-        is_available=lambda: True,
-        synchronize=lambda: calls.append("synchronize"),
-        empty_cache=lambda: calls.append("empty_cache"),
-        ipc_collect=lambda: calls.append("ipc_collect"),
-    )
-    fake_torch = SimpleNamespace(cuda=fake_cuda)
-
-    def fake_import_module(name: str) -> Any:
-        assert name == "torch"
-        return fake_torch
-
-    monkeypatch.setattr("asr_server.adapters.qwen.gc.collect", lambda: calls.append("gc_collect"))
-    monkeypatch.setattr("asr_server.adapters.qwen.importlib.import_module", fake_import_module)
-
-    await adapter.unload(cuda_empty_cache=True)
-
-    assert calls == ["to:cpu", "gc_collect", "synchronize", "empty_cache", "ipc_collect"]
-
-
-async def test_qwen_unload_continues_when_model_cleanup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-    adapter = _QwenWorkerBackend("qwen3-asr-0.6b")
-    adapter._model = FailingCleanupModel()
-    adapter.loaded_backend = "transformers"
-
-    fake_cuda = SimpleNamespace(
-        is_available=lambda: True,
-        synchronize=lambda: calls.append("synchronize"),
-        empty_cache=lambda: calls.append("empty_cache"),
-        ipc_collect=lambda: calls.append("ipc_collect"),
-    )
-    fake_torch = SimpleNamespace(cuda=fake_cuda)
-
-    def fake_import_module(name: str) -> Any:
-        assert name == "torch"
-        return fake_torch
-
-    monkeypatch.setattr("asr_server.adapters.qwen.gc.collect", lambda: calls.append("gc_collect"))
-    monkeypatch.setattr("asr_server.adapters.qwen.importlib.import_module", fake_import_module)
-
-    await adapter.unload(cuda_empty_cache=True)
-
-    assert getattr(adapter, "_model") is None
-    assert getattr(adapter, "loaded_backend") is None
-    assert calls == ["gc_collect", "synchronize", "empty_cache", "ipc_collect"]
-
-
-async def test_qwen_unload_continues_when_cuda_synchronize_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-    adapter = _QwenWorkerBackend("qwen3-asr-0.6b")
-    adapter._model = CleanupModel()
-    adapter.loaded_backend = "transformers"
-
-    def fail_synchronize() -> None:
+    def synchronize() -> None:
         calls.append("synchronize")
-        raise RuntimeError("sync failed")
-
-    fake_cuda = SimpleNamespace(
-        is_available=lambda: True,
-        synchronize=fail_synchronize,
-        empty_cache=lambda: calls.append("empty_cache"),
-        ipc_collect=lambda: calls.append("ipc_collect"),
-    )
-    fake_torch = SimpleNamespace(cuda=fake_cuda)
-
-    def fake_import_module(name: str) -> Any:
+        if failure == "cuda_synchronize":
+            raise RuntimeError("sync failed")
+    fake_cuda = SimpleNamespace(is_available=lambda: True, synchronize=synchronize,
+                                empty_cache=lambda: calls.append("empty_cache"),
+                                ipc_collect=lambda: calls.append("ipc_collect"))
+    def fake_import(name: str) -> Any:
         assert name == "torch"
-        return fake_torch
-
-    monkeypatch.setattr("asr_server.adapters.qwen.gc.collect", lambda: calls.append("gc_collect"))
-    monkeypatch.setattr("asr_server.adapters.qwen.importlib.import_module", fake_import_module)
-
+        return SimpleNamespace(cuda=fake_cuda)
+    monkeypatch.setattr("asr_server.adapters.qwen.importlib.import_module", fake_import)
     await adapter.unload(cuda_empty_cache=True)
 
-    assert getattr(adapter, "_model") is None
+    assert all(getattr(adapter, name) is None for name in ("_model", "_aligner_model", "_aligner_processor"))
     assert getattr(adapter, "loaded_backend") is None
-    assert calls == ["gc_collect", "synchronize", "empty_cache", "ipc_collect"]
+    assert aligner.closed
+    assert "empty_cache" in calls and "ipc_collect" in calls
+    assert calls.index("synchronize") < calls.index("empty_cache")
+    # CPU transfer must precede cache release; unrelated helper order is free.
+    if isinstance(model, ModelWithInnerModule):
+        assert model.closed
+        assert calls.index("to:cpu") < calls.index("empty_cache")

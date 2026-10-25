@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -164,6 +164,17 @@ class AsrAdapter(Protocol):
         max_new_tokens: int | None = None,
     ) -> list[TranscriptionResult]:
         ...
+
+
+@runtime_checkable
+class TextAlignmentAdapter(Protocol):
+    """Optional capability, checked before admission/model work by the caller."""
+
+    async def align_text(self, audio: AudioInput, *, text: str, language: str = "auto",
+                         timestamps: str = "auto") -> list[TimestampItem]:
+        ...
+
+
 @dataclass(frozen=True)
 class AudioPath:
     """A bounded view into a normalized audio file shared with model workers."""

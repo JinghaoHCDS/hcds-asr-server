@@ -23,17 +23,18 @@ from asr_server.adapters.base import (
 from asr_server.audio.metadata import inspect_audio_path
 from asr_server.audio.splitter import _energy_intervals_path
 from asr_server.errors import AsrError
-from asr_server.registry import MOSS_MODEL_ID
+from asr_server.observability import PROTOCOL_VERSION, safe_exception
+from asr_server.registry import MOSS_MODEL_ID, MODEL_SOURCES
 from asr_server.workers.transport import ProcessRpcTransport
+from asr_server.workers.codec import (
+    optional_int as _optional_int, result_to_payload as _result_to_payload,
+    result_from_payload as _result_from_payload, error_to_payload as _error_to_payload, validate_request_envelope,
+)
 from asr_server.workers.audio import audio_duration_seconds, materialized_audio_path
 
 
-MODEL_REPOS = {
-    MOSS_MODEL_ID: "OpenMOSS-Team/MOSS-Transcribe-Diarize",
-}
-MODEL_REVISIONS = {
-    MOSS_MODEL_ID: "d7231bbae2587a4af278735eb765b318c4f64edd",
-}
+MODEL_REPOS = {MOSS_MODEL_ID: MODEL_SOURCES[MOSS_MODEL_ID][0]}
+MODEL_REVISIONS = {MOSS_MODEL_ID: MODEL_SOURCES[MOSS_MODEL_ID][1]}
 DEFAULT_MOSS_PROMPT = (
     "请将音频转写为文本，每一段需以起始时间戳和说话人编号"
     "（[S01]、[S02]、[S03]…）开头，正文为对应的语音内容，"
@@ -42,17 +43,19 @@ DEFAULT_MOSS_PROMPT = (
 logger = logging.getLogger(__name__)
 
 
-def _moss_worker_main(conn: Connection, model_id: str) -> None:
+def _moss_worker_main(conn: Connection, model_id: str, repository: str | None = None,
+                      revision: str | None = None) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    backend = _MossWorkerBackend(model_id)
+    backend = _MossWorkerBackend(model_id, repository=repository, revision=revision)
     try:
         while True:
             request = conn.recv()
             request_id = request.get("id")
             op = request.get("op")
             try:
+                validate_request_envelope(request)
                 if op == "ping":
-                    conn.send({"id": request_id, "ok": True, "result": {"pid": os.getpid()}})
+                    conn.send({"id": request_id, "ok": True, "result": {"pid": os.getpid(), "protocol_version": PROTOCOL_VERSION}})
                     continue
                 if op == "load":
                     _run_async(
@@ -99,15 +102,15 @@ def _moss_worker_main(conn: Connection, model_id: str) -> None:
                     return
                 raise AsrError(400, "bad_request", f"unknown MOSS worker operation: {op}")
             except AsrError as exc:
-                conn.send({"id": request_id, "ok": False, "error": _error_to_payload(exc)})
+                conn.send({"id": request_id, "ok": False, "error": _error_to_payload(exc), "diagnostics": safe_exception(exc)})
             except Exception as exc:
                 error = AsrError(
                     503,
                     "inference_failed",
                     "MOSS worker operation failed",
-                    {"operation": str(op), "error_type": type(exc).__name__, "message": str(exc)[-500:]},
+                    {"operation": str(op), "error_type": type(exc).__name__},
                 )
-                conn.send({"id": request_id, "ok": False, "error": _error_to_payload(error)})
+                conn.send({"id": request_id, "ok": False, "error": _error_to_payload(error), "diagnostics": safe_exception(exc)})
     except EOFError:
         return
     finally:
@@ -123,122 +126,6 @@ def _run_async(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-def _optional_int(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        return int(value)
-    raise TypeError(f"expected optional int value, got {type(value).__name__}")
-
-
-def _result_to_payload(result: TranscriptionResult) -> dict[str, object]:
-    return {
-        "text": result.text,
-        "duration": result.duration,
-        "language": result.language,
-        "warnings": result.warnings,
-        "segments": [segment.to_api() for segment in result.segments],
-        "timestamps": [item.to_api() for item in result.timestamps],
-        "timings": {
-            "total_ms": result.timings.total_ms,
-            "load_ms": result.timings.load_ms,
-            "decode_ms": result.timings.decode_ms,
-            "inference_ms": result.timings.inference_ms,
-            "postprocess_ms": result.timings.postprocess_ms,
-        },
-        "generation": result.generation.to_api(),
-        "context": result.context.to_api(),
-    }
-
-
-def _result_from_payload(payload: Any) -> TranscriptionResult:
-    timings = payload.get("timings", {})
-    generation = payload.get("generation", {})
-    context = payload.get("context", {})
-    return TranscriptionResult(
-        text=str(payload["text"]),
-        duration=float(payload["duration"]),
-        language=str(payload["language"]),
-        warnings=[str(warning) for warning in payload.get("warnings", [])],
-        segments=[
-            TranscriptionSegment(
-                start=float(segment["start"]),
-                end=float(segment["end"]),
-                speaker=str(segment["speaker"]) if segment.get("speaker") is not None else None,
-                text=str(segment["text"]),
-                source_speaker=(
-                    str(segment["source_speaker"])
-                    if segment.get("source_speaker") is not None
-                    else None
-                ),
-                speaker_resolution=(
-                    str(segment["speaker_resolution"])
-                    if segment.get("speaker_resolution") is not None
-                    else None
-                ),
-            )
-            for segment in payload.get("segments", [])
-        ],
-        timestamps=[
-            TimestampItem(
-                text=str(item["text"]),
-                start=float(item["start"]),
-                end=float(item["end"]),
-                granularity=str(item["granularity"]),
-                source=str(item.get("source", "unknown")),
-                status=str(item.get("status", "aligned")),
-            )
-            for item in payload.get("timestamps", [])
-        ],
-        timings=TranscriptionTimings(
-            total_ms=float(timings.get("total_ms", 0.0)),
-            load_ms=float(timings.get("load_ms", 0.0)),
-            decode_ms=float(timings.get("decode_ms", 0.0)),
-            inference_ms=float(timings.get("inference_ms", 0.0)),
-            postprocess_ms=float(timings.get("postprocess_ms", 0.0)),
-        ),
-        generation=GenerationMetrics(
-            prompt_tokens=_optional_int(generation.get("prompt_tokens")),
-            generated_tokens=_optional_int(generation.get("generated_tokens")),
-            max_new_tokens=_optional_int(generation.get("max_new_tokens")),
-            peak_vram_allocated_mb=_optional_float(generation.get("peak_vram_allocated_mb")),
-            segment_coverage_end_seconds=_optional_float(generation.get("segment_coverage_end_seconds")),
-            segment_coverage_ratio=_optional_float(generation.get("segment_coverage_ratio")),
-            audible_speech_end_seconds=_optional_float(generation.get("audible_speech_end_seconds")),
-            uncovered_speech_intervals=_optional_int(generation.get("uncovered_speech_intervals")),
-            truncated=bool(generation.get("truncated", False)),
-            finish_reason=str(generation["finish_reason"]) if generation.get("finish_reason") is not None else None,
-        ),
-        context=ContextApplication(
-            requested=bool(context.get("requested", False)),
-            applied=bool(context.get("applied", False)),
-            method=str(context["method"]) if context.get("method") is not None else None,
-            input_chars=int(context.get("input_chars", 0)),
-            used_chars=int(context.get("used_chars", 0)),
-            hotword_count=int(context.get("hotword_count", 0)),
-            truncated=bool(context.get("truncated", False)),
-            ignored_reason=str(context["ignored_reason"]) if context.get("ignored_reason") is not None else None,
-        ),
-    )
-
-
-def _error_to_payload(error: AsrError) -> dict[str, object]:
-    return {
-        "status_code": error.status_code,
-        "code": error.code,
-        "message": error.message,
-        "details": error.details,
-    }
-
-
-def _optional_float(value: object) -> float | None:
-    if isinstance(value, int | float):
-        return float(value)
-    return None
-
-
 class MossTranscribeDiarizeAdapter:
     """MOSS-Transcribe-Diarize adapter with GPU work isolated in a child process."""
 
@@ -246,6 +133,8 @@ class MossTranscribeDiarizeAdapter:
         self,
         model_id: str,
         *,
+        repository: str | None = None,
+        revision: str | None = None,
         startup_timeout_seconds: float = 30.0,
         load_timeout_seconds: float = 900.0,
         inference_timeout_seconds: float = 3600.0,
@@ -259,7 +148,7 @@ class MossTranscribeDiarizeAdapter:
         self._transport = ProcessRpcTransport(
             name=f"MOSS {model_id}",
             target=_moss_worker_main,
-            target_args=(model_id,),
+            target_args=(model_id, repository, revision),
             startup_timeout_seconds=startup_timeout_seconds,
         )
 
@@ -347,8 +236,10 @@ class _MossHelpers:
 class _MossWorkerBackend:
     """In-process MOSS backend used only inside the worker process."""
 
-    def __init__(self, model_id: str) -> None:
+    def __init__(self, model_id: str, *, repository: str | None = None, revision: str | None = None) -> None:
         self.model_id = model_id
+        self._repository = repository or MODEL_REPOS.get(model_id)
+        self._revision = revision or MODEL_REVISIONS.get(model_id)
         self.loaded_backend: str | None = None
         self._model: Any | None = None
         self._processor: Any | None = None
@@ -359,7 +250,7 @@ class _MossWorkerBackend:
         self._max_new_tokens: int | None = None
 
     async def load(self, backend: str, device: str, dtype: str, max_new_tokens: int | None = None) -> None:
-        if self.model_id not in MODEL_REPOS:
+        if not self._repository or not self._revision:
             raise AsrError(404, "model_not_found", f"unknown MOSS model: {self.model_id}")
         if device not in {"cuda", "cuda:0"}:
             raise AsrError(422, "capability_not_supported", "MOSS adapter requires device=cuda or cuda:0")
@@ -370,8 +261,7 @@ class _MossWorkerBackend:
         torch_device = torch.device(device)
         processor_cls, model_cls = self._import_transformers()
         helpers = self._import_moss_helpers()
-        repo_id = MODEL_REPOS[self.model_id]
-        revision = MODEL_REVISIONS[self.model_id]
+        repo_id, revision = self._repository, self._revision
         if self._model is not None:
             await self.unload(cuda_empty_cache=True)
         try:
