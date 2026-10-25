@@ -1,5 +1,6 @@
-export type IconName = 'wave' | 'upload' | 'list' | 'settings' | 'arrow' | 'logout' | 'check' | 'file' | 'play' | 'download' | 'close' | 'refresh' | 'edit' | 'headphones' | 'alert' | 'plus';
+export type IconName = 'wave' | 'upload' | 'list' | 'settings' | 'arrow' | 'logout' | 'check' | 'file' | 'play' | 'download' | 'close' | 'refresh' | 'edit' | 'headphones' | 'alert' | 'plus' | 'search' | 'locate' | 'panel';
 const paths: Record<IconName, string> = {
+  search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0', locate: 'M12 2v4m0 12v4M2 12h4m12 0h4M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0M12 9v6m-3-3h6', panel: 'M3 4h18v16H3V4Zm12 0v16',
   wave: 'M3 10v4m4-8v12m5-16v20m5-16v12m4-8v4', upload: 'M12 16V3m-5 5 5-5 5 5M3 16v5h18v-5',
   list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01', settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3Z',
   arrow: 'M5 12h14m-5-5 5 5-5 5', logout: 'M9 3H3v18h6m0-9h12m-5-5 5 5-5 5', check: 'm5 12 4 4L19 6',

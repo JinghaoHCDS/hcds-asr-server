@@ -27,7 +27,7 @@ export interface Result {
   segments: Segment[];
   version: number;
   versions?: { version: number; created_at: string; alignment_status: string }[];
-  alignment_status: 'aligned' | 'pending' | 'failed' | 'unavailable' | 'incomplete';
+  alignment_status: 'aligned' | 'segment_timed' | 'pending' | 'failed' | 'unavailable' | 'incomplete';
   quality?: { issues?: Issue[]; profile_version?: string; validation_status?: string };
   changes?: unknown[];
 }

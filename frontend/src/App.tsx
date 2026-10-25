@@ -4,6 +4,7 @@ import { Icon, type IconName } from './icons';
 import UploadPane from './UploadPane';
 import ResultPane from './ResultPane';
 import AdminPane from './AdminPane';
+import { useEntrance } from './motion';
 
 type Page = 'upload' | 'jobs' | 'result' | 'admin';
 
@@ -19,6 +20,8 @@ export default function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busyJob, setBusyJob] = useState('');
+  const shell = useRef<HTMLDivElement>(null);
+  useEntrance(shell, `${page}:${ready}:${user?.id}`, '.page-header, .page-surface');
   const polling = useRef(false);
   const currentUser = useRef<User | null>(user);
   const currentJobs = useRef<Job[]>(jobs);
@@ -120,11 +123,11 @@ export default function App() {
     result: ['回听、校对，然后交付。', selected?.filename || '转录结果'], admin: ['管理工作台', '维护账户、词库和共享资源。'],
   };
 
-  return <div className="app-shell">
+  return <div ref={shell} className={`app-shell ${page === 'result' ? 'is-result' : ''}`}>
     <aside className="sidebar">
       <a href="#upload" className="brand" onClick={e => { e.preventDefault(); setPage('upload'); }}><span className="brand-mark"><Icon name="wave" size={25} /></span><span>声笺<small>ASR WORKSPACE</small></span></a>
       <div className="workspace-label">我的工作空间</div>
-      <nav aria-label="主导航">{nav.map(n => <button key={n.id} className={`nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}><Icon name={n.icon} /><span>{n.title}</span>{n.id === 'jobs' && running > 0 && <b className="nav-count">{running}</b>}</button>)}</nav>
+      <nav aria-label="主导航">{nav.map(n => <button key={n.id} aria-current={page === n.id || (page === 'result' && n.id === 'jobs') ? 'page' : undefined} className={`nav-item ${(page === n.id || (page === 'result' && n.id === 'jobs')) ? 'active' : ''}`} onClick={() => setPage(n.id)}><Icon name={n.icon} /><span>{n.title}</span>{n.id === 'jobs' && running > 0 && <b className="nav-count">{running}</b>}</button>)}</nav>
       <div className="sidebar-foot"><div className="local-note"><span className="status-dot" />局域网工作台<small>音频与结果在本地服务器处理</small></div><div className="user-row"><span className="avatar">{user.username.slice(0, 1).toUpperCase()}</span><span className="user-name">{user.username}<small>{user.is_admin ? '管理员' : '个人空间'}</small></span><button className="icon-button" aria-label="退出登录" title="退出登录" onClick={() => void logout()}><Icon name="logout" size={18} /></button></div></div>
     </aside>
     <main className="main-content">
@@ -132,19 +135,21 @@ export default function App() {
       <header className="page-header"><div><div className="eyebrow">{page === 'upload' ? 'FROM AUDIO TO WORDS' : 'YOUR AUDIO WORKSPACE'}</div><h1>{titles[page][0]}</h1><p>{titles[page][1]}</p></div>{page === 'jobs' && <button className="button primary" onClick={() => setPage('upload')}><Icon name="plus" size={18} />新建转录</button>}</header>
       {error && <div className="banner error" role="alert"><Icon name="alert" size={18} /><span>{error}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setError('')}><Icon name="close" size={16} /></button></div>}
       {notice && <div className="toast" role="status"><Icon name="check" size={18} />{notice}</div>}
-      <section hidden={page !== 'upload'}><UploadPane user={user} caps={caps} onSubmitted={() => { void refresh(); api<Capabilities>('/capabilities').then(setCaps).catch(() => {}); setNotice('素材已进入转录队列'); }} onOpenJobs={() => setPage('jobs')} /></section>
+      <div className="page-surface"><section hidden={page !== 'upload'}><UploadPane user={user} caps={caps} onSubmitted={() => { void refresh(); api<Capabilities>('/capabilities').then(setCaps).catch(() => {}); setNotice('素材已进入转录队列'); }} onOpenJobs={() => setPage('jobs')} /></section>
       {page === 'jobs' && <><div className="section-heading"><h2>我的任务 <span className="count">{jobs.length}</span></h2><button className="button ghost small" onClick={() => void refresh()}><Icon name="refresh" size={16} />刷新</button></div>{jobs.length === 0 ? <Empty title="还没有转录任务" detail="上传一段音频或视频，你的结果会保存在这里。" action={() => setPage('upload')} /> : <div className="job-list">{jobs.map(job => <JobCard key={job.id} job={job} busy={busyJob === job.id} onOpen={() => { setActiveId(job.id); setPage('result'); }} onAction={a => void jobAction(job, a)} />)}</div>}{nextCursor !== null && <button className="button secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? '正在读取…' : '加载更多任务'}</button>}<p className="footnote">任务结束后保留 {caps?.retention_days ?? 7} 天。删除后将同时移除音频、文字和编辑记录。</p></>}
-      {page === 'result' && activeId && <ResultPane jobId={activeId} models={caps?.models ?? []} onBack={() => setPage('jobs')} onChanged={() => void refresh()} />}
+      {page === 'result' && activeId && <ResultPane key={activeId} jobId={activeId} models={caps?.models ?? []} onBack={() => setPage('jobs')} onChanged={() => void refresh()} />}
       {page === 'admin' && user.is_admin && <AdminPane />}
-      <footer className="page-footer"><span>声笺 <span className="muted">·</span> 把精力留给内容</span><span>本地处理 · 忠实转录 · 可回听校对</span></footer>
+      </div><footer className="page-footer"><span>声笺 <span className="muted">·</span> 把精力留给内容</span><span>本地处理 · 忠实转录 · 可回听校对</span></footer>
     </main>
   </div>;
 }
 
 function Login({ initialError, onLogin }: { initialError: string; onLogin: (user: User) => void }) {
+  const root = useRef<HTMLElement>(null);
+  useEntrance(root, 'login', '.login-story > div, .login-form');
   const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(initialError); const [busy, setBusy] = useState(false);
   async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); setError(''); try { const r = await api<{ user: User }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }, true); setPassword(''); onLogin(r.user); } catch (e) { setError(message(e)); } finally { setBusy(false); } }
-  return <main className="login-shell"><section className="login-story"><div className="brand light"><span className="brand-mark"><Icon name="wave" size={27} /></span><span>声笺<small>ASR WORKSPACE</small></span></div><div><div className="eyebrow">LISTEN. TRANSCRIBE. CREATE.</div><h1>声音里的想法，<br />值得被好好记录。</h1><p>从一段口播，到一整期播客。<br />在本地完成转录、回听和字幕交付。</p><div className="sound-decoration" aria-hidden="true">{[16, 28, 45, 31, 65, 84, 56, 97, 72, 44, 68, 88, 54, 34, 46, 23, 14].map((h, i) => <i key={i} style={{ height: `${h}px` }} />)}</div></div><span className="login-caption">YOUR WORDS, CLOSE TO HOME.</span></section><section className="login-form-wrap"><form className="login-form" onSubmit={e => void submit(e)}><div className="eyebrow">WELCOME BACK</div><h2>进入你的工作空间</h2><p>使用管理员为你创建的账户登录。</p><label>用户名<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required autoFocus placeholder="输入用户名" /></label><label>密码<input value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" type="password" required placeholder="输入密码" /></label>{error && <div className="inline-error" role="alert">{error}</div>}<button type="submit" className="button primary wide" disabled={busy}>{busy ? '正在登录…' : '进入工作台'}<Icon name="arrow" size={18} /></button><p className="login-help">需要账户或重置密码？请联系工作台管理员。</p></form></section></main>;
+  return <main ref={root} className="login-shell"><section className="login-story"><div className="brand light"><span className="brand-mark"><Icon name="wave" size={27} /></span><span>声笺<small>ASR WORKSPACE</small></span></div><div><div className="eyebrow">LISTEN. TRANSCRIBE. CREATE.</div><h1>声音里的想法，<br />值得被好好记录。</h1><p>从一段口播，到一整期播客。<br />在本地完成转录、回听和字幕交付。</p><div className="sound-decoration" aria-hidden="true">{[16, 28, 45, 31, 65, 84, 56, 97, 72, 44, 68, 88, 54, 34, 46, 23, 14].map((h, i) => <i key={i} style={{ height: `${h}px` }} />)}</div></div><span className="login-caption">YOUR WORDS, CLOSE TO HOME.</span></section><section className="login-form-wrap"><form className="login-form" onSubmit={e => void submit(e)}><div className="eyebrow">WELCOME BACK</div><h2>进入你的工作空间</h2><p>使用管理员为你创建的账户登录。</p><label>用户名<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required autoFocus placeholder="输入用户名" /></label><label>密码<input value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" type="password" required placeholder="输入密码" /></label>{error && <div className="inline-error" role="alert">{error}</div>}<button type="submit" className="button primary wide" disabled={busy}>{busy ? '正在登录…' : '进入工作台'}<Icon name="arrow" size={18} /></button><p className="login-help">需要账户或重置密码？请联系工作台管理员。</p></form></section></main>;
 }
 
 export function Empty({ title, detail, action }: { title: string; detail: string; action?: () => void }) { return <div className="empty-state"><div className="empty-icon"><Icon name="headphones" size={28} /></div><h3>{title}</h3><p>{detail}</p>{action && <button className="button secondary" onClick={action}>上传第一份素材<Icon name="arrow" size={16} /></button>}</div>; }

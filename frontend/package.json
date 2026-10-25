@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
+    "@tanstack/react-virtual": "^3.14.22",
+    "gsap": "^3.15.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

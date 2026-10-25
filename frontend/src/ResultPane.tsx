@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, clock, date, errorNames, jobDetail, message, phaseName, terminal, type Issue, type Job, type ModelOption, type Segment } from './api';
 import { Icon } from './icons';
+import Transcript, { VirtualText } from './Transcript';
+import { useEntrance } from './motion';
 
 function issueText(issue: Issue | string) {
   if (typeof issue === 'string') return issue;
@@ -9,14 +11,37 @@ function issueText(issue: Issue | string) {
   const names: Record<string, string> = { repetition: '检测到疑似重复，请回听确认', suspected_repetition: '检测到疑似重复，请回听确认', empty_speech: '此处可能有语音未被识别', empty_transcription: '此处未识别出文字，请回听确认', term_candidate: '术语写法需要确认', suspected_term: '术语写法需要确认', boundary_conflict: '分段交界处需要确认', review_budget_exhausted: '此处仍需要人工回听', alignment_failed: '字幕对齐未完成', suspected_uncovered_audio: '此处有声音但未对齐到文字，请回听确认', alignment_unavailable_mock: '此测试结果没有真实时间对齐', alignment_text_mapping: '文字与字幕对齐关系需要确认', generation_truncated: '此处识别输出可能不完整' };
   return names[issue.kind || issue.code || issue.type || ''] || issue.message || '此片段需要回听确认';
 }
-function isNear(issue: Issue, segment: Segment) { return issue.start !== undefined ? issue.start <= segment.end && (issue.end ?? issue.start) >= segment.start : issue.chunk_index === segment.index; }
 
 export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId: string; models: ModelOption[]; onBack: () => void; onChanged: () => void }) {
+  const root = useRef<HTMLDivElement>(null);
+  const modal = useRef<HTMLDivElement>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [issuePage, setIssuePage] = useState(0);
+  const [changePage, setChangePage] = useState(0);
+  const [jump, setJump] = useState<{ seconds: number; serial: number } | null>(null);
   const [job, setJob] = useState<Job | null>(null); const [error, setError] = useState(''); const [raw, setRaw] = useState(false);
   const [edit, setEdit] = useState<Segment | null>(null); const [editBaseVersion, setEditBaseVersion] = useState(1); const [draft, setDraft] = useState(''); const [saving, setSaving] = useState(false);
   const [position, setPosition] = useState(0); const [exportVersion, setExportVersion] = useState<number | null>(null);
   const [format, setFormat] = useState('txt'); const [exporting, setExporting] = useState(false); const [notice, setNotice] = useState('');
   const [audioError, setAudioError] = useState(false); const audio = useRef<HTMLAudioElement>(null);
+  useEntrance(root, !!job?.result, '.audio-panel, .result-grid, .waiting-result');
+  useEntrance(modal, edit?.id, '.edit-modal');
+  useEntrance(root, toolsOpen, '.result-aside');
+  useEffect(() => {
+    if (!edit) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) setEdit(null);
+      if (event.key !== 'Tab') return;
+      const nodes = Array.from(modal.current?.querySelectorAll<HTMLElement>('button:not(:disabled), textarea, [tabindex="0"]') || []);
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); previous?.focus(); };
+  }, [edit, saving]);
+  useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 5000); return () => window.clearTimeout(timer); }, [notice]);
   const etag = useRef<{ id: string; value?: string }>({ id: jobId });
   const selectedId = useRef(jobId); selectedId.current = jobId;
   const capabilities = models.find(model => model.id === job?.model)?.capabilities;
@@ -51,7 +76,7 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
   }, [pending, load]);
   useEffect(() => { if (job?.result?.version !== undefined) setExportVersion(job.result.version); }, [job?.result?.version]);
 
-  function seek(seconds: number) { if (audio.current) { audio.current.currentTime = seconds; void audio.current.play().catch(() => setNotice('请点击播放器的播放按钮回听。')); } }
+  function seek(seconds: number) { setJump(previous => ({ seconds, serial: (previous?.serial ?? 0) + 1 })); setPosition(seconds); if (audio.current) { audio.current.currentTime = seconds; void audio.current.play().catch(() => setNotice('请点击播放器的播放按钮回听。')); } }
   function beginEdit(segment: Segment) { setEdit(segment); setEditBaseVersion(job?.result?.version ?? 1); setDraft(segment.text); setError(''); }
   async function save() {
     if (!edit || !job?.result || !draft.trim()) return;
@@ -83,8 +108,9 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
 
   const result = job?.result; const segments = result?.segments || []; const issues = result?.quality?.issues || [];
   const versionStatus = result?.versions?.find(v => v.version === exportVersion)?.alignment_status || result?.alignment_status;
-  const subtitleBlocked = ['srt', 'vtt'].includes(format) && versionStatus !== 'aligned';
-  return <div className="result-workspace"><button className="text-link back-link" onClick={onBack}>← 返回我的任务</button>
+  const segmentTimed = !!capabilities?.segment_timestamps && ['segment_timed', 'unavailable'].includes(versionStatus || '');
+  const subtitleBlocked = ['srt', 'vtt'].includes(format) && versionStatus !== 'aligned' && !segmentTimed;
+  return <div ref={root} className={`result-workspace ${toolsOpen ? 'tools-open' : ''}`}><div className="result-topbar"><button className="text-link back-link" onClick={onBack}>← 我的任务</button><span className="result-title">转录编辑室</span><button className="button secondary small tools-toggle" aria-expanded={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)}><Icon name="panel" size={16} />{toolsOpen ? '返回正文' : '导出与复核'}</button></div>
     {error && <div className="banner error" role="alert"><Icon name="alert" size={18} />{error}</div>}
     {notice && <div className="banner neutral" role="status"><span>{notice}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setNotice('')}><Icon name="close" size={16} /></button></div>}
     {!job ? <div className="panel loading-panel">正在读取任务…</div> : <>
@@ -95,17 +121,18 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
         {job.error && <p className="inline-error" role="alert">{errorNames[job.error.code] || job.error.message}</p>}
       </section>
       {result ? <div className="result-grid"><div className="result-document"><section className="panel transcript-panel"><div className="document-toolbar"><div className="segmented" role="group" aria-label="文本视图"><button className={!raw ? 'selected' : ''} onClick={() => setRaw(false)}>交付稿</button><button className={raw ? 'selected' : ''} onClick={() => setRaw(true)}>模型原稿</button></div><div className="document-tools"><span className="subtle-label">当前 v{result.version}</span><button className="button ghost small" onClick={() => void copy()}>复制全文</button></div></div>
-        <div className="transcript-help"><Icon name="play" size={14} /><span>{raw ? '模型原稿保留识别结果，可与规范后的交付稿对照。' : '点击文字回听原音，将鼠标移到片段右侧即可修改文字。'}</span></div>
-        {segments.length ? <div className="transcript-segments">{segments.map((segment, i) => {
-          const near = issues.some(issue => typeof issue !== 'string' && isNear(issue, segment)); const current = position >= segment.start && position < segment.end;
-          return <div key={segment.id || i} className={`transcript-segment ${current ? 'playing' : ''} ${near ? 'needs-review' : ''}`}><button className="segment-time" onClick={() => seek(segment.start)} aria-label={`回听 ${clock(segment.start)} 的片段`}>{clock(segment.start)}<Icon name="play" size={12} /></button><button className="segment-text" onClick={() => seek(segment.start)}>{raw ? segment.raw_text || segment.text : segment.text}{near && <span className="review-dot" title="此处有待复核问题" />}</button>{!raw && canEdit && <button className="icon-button edit-segment" aria-label={`修改第 ${i + 1} 段文字`} onClick={() => beginEdit(segment)}><Icon name="edit" size={16} /></button>}</div>;
-        })}</div> : <div className="plain-transcript">{raw ? result.raw_text || result.text : result.text || '此素材未识别出可转录的文字。'}</div>}
+        <div className="transcript-help"><Icon name="play" size={14} /><span>{raw ? '模型原稿保留识别结果，可与规范后的交付稿对照。' : '搜索、跳转或跟随播放，快速找到你要的那一句。'}</span></div>
+        {segments.length ? <Transcript segments={segments} raw={raw} position={position} seek={seek} onEdit={canEdit ? beginEdit : undefined} issues={issues} jump={jump} /> : <VirtualText text={(raw ? result.raw_text || result.text : result.text) || ''} />}
       </section></div><aside className="result-aside"><section className="panel export-panel"><div className="section-heading"><h3>导出结果</h3><Icon name="download" size={19} /></div><label className="field-label">文本版本<select value={exportVersion ?? result.version} onChange={e => setExportVersion(Number(e.target.value))}>{(result.versions?.length ? result.versions : [{ version: result.version, created_at: '', alignment_status: result.alignment_status }]).map(v => <option key={v.version} value={v.version}>v{v.version}{v.version === result.version ? ' · 当前版本' : ''}{v.alignment_status === 'pending' ? ' · 字幕更新中' : ''}</option>)}</select></label><label className="field-label">文件格式<select value={format} onChange={e => setFormat(e.target.value)}><option value="txt">TXT · 纯文本</option>{canSubtitle && <><option value="srt">SRT · 字幕</option><option value="vtt">VTT · 网页字幕</option></>}<option value="json">JSON · 完整结果</option></select></label><button className="button primary wide" disabled={exporting || subtitleBlocked} onClick={() => void download()}><Icon name="download" size={17} />{exporting ? '正在导出…' : '下载所选版本'}</button>{subtitleBlocked && <p className="footnote">{versionStatus === 'failed' ? '此版本字幕对齐失败，可先导出文字或选择此前已对齐的版本。' : '字幕正在更新，可先导出文字或选择此前已对齐的版本。'}</p>}<p className="footnote">导出使用所选版本的交付稿。模型原稿可在左侧查看、复制，也保留在完整 JSON 中。</p></section>
-        {result.alignment_status !== 'aligned' && <div className="banner neutral"><Icon name="refresh" size={18} /><span>{result.alignment_status === 'pending' ? '字幕更新中' : '字幕暂未完成对齐'}</span></div>}
-        <section className="panel review-panel"><div className="section-heading"><h3>回听清单</h3><span className="count">{issues.length}</span></div>{issues.length === 0 ? <p className="muted">系统未标记待复核问题。你仍可以回听原音进行校对。</p> : <div className="issue-list">{issues.map((issue, i) => <button className="issue-item" key={i} onClick={() => seek(typeof issue !== 'string' ? issue.start ?? 0 : 0)}><Icon name="alert" size={17} /><span><strong>{typeof issue !== 'string' && issue.start !== undefined ? clock(issue.start) : '需要确认'}</strong><small>{issueText(issue)}</small></span><Icon name="play" size={12} /></button>)}</div>}</section>
-        {!!result.changes?.length && <section className="panel"><h3>词汇与修改记录</h3><p className="muted">已记录 {result.changes.length} 项调整，原始识别稿保持可对照。</p><div className="changes-list">{result.changes.map((change, i) => { const value = change as { before?: string; after?: string; original?: string; replacement?: string; from?: string; to?: string; source?: string }; const before = value.before ?? value.original ?? value.from; const after = value.after ?? value.replacement ?? value.to; return <div key={i}>{before && after ? <><span>{before}</span><Icon name="arrow" size={12} /><strong>{after}</strong></> : <span>第 {i + 1} 项修改已保存</span>}</div>; })}</div></section>}
-      </aside></div> : <section className="panel waiting-result"><Icon name="wave" size={34} /><h3>{job.status === 'failed' ? '任务未完成' : '文字正在路上'}</h3><p>{job.status === 'failed' ? '已有处理进度会保留。返回任务列表查看错误或重试。' : '任务完成后，回听、校对和导出工具会显示在这里。'}</p>{job.progress?.text && <div className="partial-text"><strong>已完成片段的临时文字</strong><p>{job.progress.text}</p></div>}</section>}
+        {result.alignment_status !== 'aligned' && !segmentTimed && <div className="banner neutral"><Icon name="refresh" size={18} /><span>{result.alignment_status === 'pending' ? '字幕更新中' : '字幕暂未完成对齐'}</span></div>}
+        <section className="panel review-panel"><div className="section-heading"><h3>回听清单</h3><span className="count">{issues.length}</span></div>{issues.length === 0 ? <p className="muted">系统未标记待复核问题。你仍可以回听原音进行校对。</p> : <div className="issue-list">{issues.slice(issuePage * 20, (issuePage + 1) * 20).map((issue, i) => <button className="issue-item" key={i} onClick={() => seek(typeof issue !== 'string' ? issue.start ?? 0 : 0)}><Icon name="alert" size={17} /><span><strong>{typeof issue !== 'string' && issue.start !== undefined ? clock(issue.start) : '需要确认'}</strong><small>{issueText(issue)}</small></span><Icon name="play" size={12} /></button>)}</div>}{issues.length > 20 && <Pager page={issuePage} count={issues.length} setPage={setIssuePage} />}</section>
+        {!!result.changes?.length && <section className="panel"><h3>词汇与修改记录</h3><p className="muted">已记录 {result.changes.length} 项调整，原始识别稿保持可对照。</p><div className="changes-list">{result.changes.slice(changePage * 20, (changePage + 1) * 20).map((change, i) => { const value = change as { before?: string; after?: string; original?: string; replacement?: string; from?: string; to?: string; source?: string }; const before = value.before ?? value.original ?? value.from; const after = value.after ?? value.replacement ?? value.to; return <div key={i}>{before && after ? <><span>{before}</span><Icon name="arrow" size={12} /><strong>{after}</strong></> : <span>第 {i + 1} 项修改已保存</span>}</div>; })}</div>{result.changes.length > 20 && <Pager page={changePage} count={result.changes.length} setPage={setChangePage} />}</section>}
+      </aside></div> : <section className="panel waiting-result"><Icon name="wave" size={34} /><h3>{job.status === 'failed' ? '任务未完成' : '文字正在路上'}</h3><p>{job.status === 'failed' ? '已有处理进度会保留。返回任务列表查看错误或重试。' : '任务完成后，回听、校对和导出工具会显示在这里。'}</p>{job.progress?.text && <div className="partial-text"><strong>已完成片段的临时文字</strong><VirtualText text={job.progress.text} /></div>}</section>}
     </>}
-    {edit && <div className="modal-backdrop" role="presentation" onClick={() => { if (!saving) setEdit(null); }}><section className="edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title" onClick={e => e.stopPropagation()}><div className="section-heading"><h2 id="edit-title">修改片段文字</h2><button className="icon-button" disabled={saving} aria-label="关闭编辑" onClick={() => setEdit(null)}><Icon name="close" size={20} /></button></div><button className="text-link" onClick={() => seek(edit.start)}><Icon name="play" size={14} />回听 {clock(edit.start)} – {clock(edit.end)}</button><label className="field-label">片段内容<textarea value={draft} onChange={e => setDraft(e.target.value)} rows={7} autoFocus /></label><p className="footnote">保存后建立新版本，并重新对齐受影响片段。原稿及先前版本会保留。</p>{error && <p className="inline-error" role="alert">{error}</p>}<div className="modal-actions"><button className="button secondary" disabled={saving} onClick={() => setEdit(null)}>取消</button><button className="button primary" disabled={saving || !draft.trim() || draft.trim() === edit.text.trim()} onClick={() => void save()}>{saving ? '保存中…' : '保存并更新字幕'}</button></div></section></div>}
+    {edit && <div ref={modal} className="modal-backdrop" role="presentation" onClick={() => { if (!saving) setEdit(null); }}><section className="edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title" onClick={e => e.stopPropagation()}><div className="section-heading"><h2 id="edit-title">修改片段文字</h2><button className="icon-button" disabled={saving} aria-label="关闭编辑" onClick={() => setEdit(null)}><Icon name="close" size={20} /></button></div><button className="text-link" onClick={() => seek(edit.start)}><Icon name="play" size={14} />回听 {clock(edit.start)} – {clock(edit.end)}</button><label className="field-label">片段内容<textarea value={draft} onChange={e => setDraft(e.target.value)} rows={7} autoFocus /></label><p className="footnote">保存后建立新版本，并重新对齐受影响片段。原稿及先前版本会保留。</p>{error && <p className="inline-error" role="alert">{error}</p>}<div className="modal-actions"><button className="button secondary" disabled={saving} onClick={() => setEdit(null)}>取消</button><button className="button primary" disabled={saving || !draft.trim() || draft.trim() === edit.text.trim()} onClick={() => void save()}>{saving ? '保存中…' : '保存并更新字幕'}</button></div></section></div>}
   </div>;
+}
+
+function Pager({ page, count, setPage }: { page: number; count: number; setPage: (page: number) => void }) {
+  return <div className="aside-pager"><button className="button ghost small" disabled={page === 0} onClick={() => setPage(page - 1)}>上一页</button><span>{page + 1} / {Math.ceil(count / 20)}</span><button className="button ghost small" disabled={(page + 1) * 20 >= count} onClick={() => setPage(page + 1)}>下一页</button></div>;
 }

@@ -1,0 +1,92 @@
+{
+  "fixture": {
+    "segments": 10800,
+    "duration_seconds": 21600,
+    "type": "synthetic UI fixture with sparse silent WAV; not ASR quality evidence"
+  },
+  "desktop": {
+    "initial_rendered_segments": 8,
+    "viewport_height": 1000,
+    "document_height": 1000,
+    "last_jump": "05:59:50",
+    "rendered_after_jump": 12
+  },
+  "search": {
+    "query": "关键决策",
+    "matching_segment": 10000,
+    "rendered_rows": 1,
+    "highlight": true
+  },
+  "edit": {
+    "saved_version": 2,
+    "raw_preserved": true,
+    "escape_closes_dialog": true,
+    "textarea_autofocus": true
+  },
+  "export": {
+    "characters": 590793,
+    "includes_final_segment": true,
+    "includes_edit": true,
+    "sha256": "d2fcbfd27ef632edbf413acd701046a82478a49bcaec2185971a955307d36156"
+  },
+  "follow": {
+    "moves_to_four_hours": true,
+    "manual_wheel_disables_follow": true
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844,
+    "document_width": 390,
+    "document_height": 844,
+    "time_jump_visible": true,
+    "tools_separate_scroll": true,
+    "rendered_issues": 20,
+    "partial_text_rendered_blocks": 3
+  },
+  "reduced_motion": {
+    "matched": true,
+    "inline_opacity": "",
+    "inline_transform": ""
+  },
+  "production": {
+    "origin": "http://192.168.31.137:18080",
+    "accent": "#0C91FA",
+    "atmosphere": "#BECBEB",
+    "script": "/assets/index-DtnYfKwE.js",
+    "document_width": 1296,
+    "viewport_width": 1296
+  },
+  "deployment": {
+    "kind": "frontend-overlay",
+    "source_sha256": "9569367dc468e9b86535441213fc3859622cc5bc7ed6bedcec6daf5005ca5f9c",
+    "pid_before": "10543",
+    "backup": "/home/fragt/services/backups/workbench-ui-20261025",
+    "files": 15,
+    "health": {
+      "status": "ok",
+      "version": "0.1.0",
+      "host": "choi",
+      "gpu": {
+        "available": true,
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "vram_total_mb": 16275
+      },
+      "gpu_snapshot_at": "2026-10-25T05:59:16.209682+00:00"
+    },
+    "pid_after": "10543",
+    "no_restart": true,
+    "backend_unchanged": true,
+    "status": "deployed"
+  },
+  "build": {
+    "typescript": "passed",
+    "vite": "passed",
+    "js_gzip_kb": 131.11,
+    "css_gzip_kb": 6.47
+  },
+  "screenshots": {
+    "long-desktop.png": "d9f6e2b4908ed49ac939f6fa766fb6cbe408a97f6803490dceafd20252a96096",
+    "mobile-final.png": "143f8dcbca5e51ad8b3051ed59dfc6d96e650e1cd609a7eeef49498a34e902bc",
+    "upload-final.png": "c5b1ef749d6fa8a2be01a7c22919a3b95dd43d80ac99701b77f5d110fafba3c9"
+  }
+}
