@@ -21,6 +21,7 @@
 
 这些是对应版本和环境的历史证据，不代表所有硬件、发行版、模型或音频质量都已验证。
 
+- [2026-10-25 Skill 随包地址](validation-2026-10-25-skill-address.md)：部署地址自动注入、解压即用、地址覆盖顺序及生成配置不进入服务源包。
 - [2026-10-25 官方 Agent Skill](validation-2026-10-25-agent-skill.md)：本机 lan-asr 更新、官方同源分发、原始 HTML 发现入口、批量客户端迁移与 mock HTTP 流程。
 - [2026-10-25 工作台界面与长转录](validation-2026-10-25-workbench-ui.md)：HCDS 主题、GSAP、固定视口与虚拟列表；10,800 段构造样本、手机布局、完整导出和前端覆盖发布。
 - [2026-10-25 审查修复与线上实测](validation-2026-10-25-review-fixes.md)：63 项线上检查、三模型有限样本 WER/CER、MOSS SDPA 探针及部署／数据完整性证据。

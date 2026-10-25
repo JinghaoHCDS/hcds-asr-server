@@ -8,6 +8,7 @@ Type=simple
 WorkingDirectory="@PROJECT_DIR@"
 Environment=ASR_HOST=@HOST@
 Environment=ASR_PORT=@PORT@
+Environment="ASR_PUBLIC_BASE_URL=@PUBLIC_BASE_URL@"
 Environment=ASR_ADAPTER=@ADAPTER@
 Environment=ASR_QWEN_BATCH_SIZE=@QWEN_BATCH_SIZE@
 Environment=ASR_IDLE_UNLOAD_SECONDS=@IDLE_UNLOAD_SECONDS@

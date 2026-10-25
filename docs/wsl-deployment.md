@@ -4,6 +4,12 @@
 
 已完成真实 GPU 验收的参考环境是 **WSL2 Arch Linux + RTX 5070 Ti 16 GB**。其他 NVIDIA 显卡需要在自己的机器上重新通过 CUDA 和模型 smoke；Ubuntu 下文提供依赖准备参考，尚未完成该发行版的项目 GPU 验收。
 
+部署后从局域网访问 `/skill/lan-asr.zip`，包内 `server.json` 会自动带上该部署的访问地址。
+默认从实际下载 URL 获取，避免把 WSL NAT 内部地址当作 Windows LAN 地址。
+需要固定公布地址时，可传 `--public-base-url http://YOUR_WINDOWS_LAN_IP:18080`，
+或在项目 `.env` 中设置 `ASR_PUBLIC_BASE_URL`（后者优先）。
+显式命令行和 `ASR_BASE_URL` 仍可覆盖客户端的随包地址；修改地址后应重新下载包。
+
 ## 1. 准备 Windows 和 WSL
 
 已有 WSL 的用户，在 Windows PowerShell 查看发行版名称和版本：

@@ -54,6 +54,7 @@ def digest(path: Path) -> str:
 def permitted(path: Path) -> bool:
     return not (
         set(path.parts) & EXCLUDED_PARTS
+        or path.as_posix() == "skills/lan-asr/server.json"
         or path.suffix in EXCLUDED_SUFFIXES
         or (path.name.startswith(".env") and path.name != ".env.example")
         or path.name in {".DS_Store", "service.lock", "token", "token.txt", "tokens.json", "secrets.json", "credentials.json", ".npmrc", ".netrc"}

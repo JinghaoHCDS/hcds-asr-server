@@ -26,6 +26,9 @@ frontend/node_modules/
 frontend/dist/
 *.tsbuildinfo
 
+# Deployment-specific client config is generated in Skill downloads.
+/skills/lan-asr/server.json
+
 # Editor
 .idea/
 .vscode/

@@ -5,7 +5,7 @@
 - `skills/lan-asr/` 是官方客户端 Skill 的维护来源，沿用现有名称 `lan-asr`。
 - `GET /skill` 返回其中的 `SKILL.md`；`/skill/lan-asr.zip` 和 `/skill/asr_batch.py` 分发同版本客户端。`/docs`、OpenAPI、README 和客户端提示词均链接该入口。
 - 变更调用协议时同步官方 Skill 及配套客户端；文档不能替代 `/v1/models` 的运行时能力发现。发行包必须包含 `skills/lan-asr/`。
-- Skill 不绑定个人 LAN IP；本地安装通过 `ASR_BASE_URL` 或 `--base-url` 配置地址。升级客户端保留既有批次数据库和请求快照。
+- 仓库 Skill 模板不绑定个人 LAN IP；分发 ZIP 自动生成 `server.json`，地址优先取 `ASR_PUBLIC_BASE_URL`，空值/loopback/通配地址使用实际下载 URL。客户端优先命令行、环境变量、随包地址，再取本机配置及 loopback；升级保留既有批次数据库和请求快照。
 
 ## 2026-10-25 平台扩展契约
 

@@ -2,7 +2,7 @@
 name: lan-asr
 description: "Use an existing LAN ASR Server to transcribe local audio or video, obtain real alignment or anonymous speaker segments, and run resumable client-side batches through its HTTP API."
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
   validated-client: "macOS with Python 3.12+; other client platforms require validation"
   hermes:
     tags: [asr, transcription, batch, local-network]
@@ -10,11 +10,15 @@ metadata:
 
 # LAN ASR Server — Official Agent Skill
 
+<!-- deployment-address -->
+
 Use this skill to call an existing LAN ASR Server. Inference runs on the server; the client needs no GPU packages or model downloads. This guide belongs to the server version that serves it. Runtime availability and capabilities always come from `GET /v1/models`.
 
 ## Find the server and its instructions
 
-Use the server address supplied by the user. The bundled client's priority is `--base-url`, then `ASR_BASE_URL`, then the `base_url` in `~/.Agent/state/lan-asr/config.json`, then `http://127.0.0.1:18080`. The last address means a server on the client's own machine, not an automatically discovered LAN server. Keep machine-specific addresses in local configuration, not in the shared Skill. Never substitute another person's IP or a public transcription service.
+The server's ZIP automatically includes its deployment address in `server.json` beside SKILL.md. The bundled client's priority is `--base-url`, then `ASR_BASE_URL`, then that bundled `server.json`, then `~/.Agent/state/lan-asr/config.json`, then `http://127.0.0.1:18080`. A deployment's package takes precedence over an older machine-wide default; an explicit argument or environment variable can still override it. When installing or moving the Skill, keep `server.json` alongside SKILL.md and `scripts/`. Keep machine-specific addresses out of the repository template. Never substitute another person's IP or a public transcription service.
+
+For a freshly downloaded package, no IP configuration is needed. Its address comes from the service's configured `ASR_PUBLIC_BASE_URL`, or from the actual download URL when no usable LAN address is configured. The repository copy and standalone script download have no bundled server.json; supply the server address through the available configuration methods. A loopback address refers to the client's own machine. If the service moves or its IP changes, download a fresh package or explicitly override its address.
 
 Relative HTTP links in this guide use that server as their origin:
 
@@ -80,7 +84,7 @@ Confirm the source and output directories when the user has not supplied them. T
 
 ```bash
 python3 /path/to/lan-asr/scripts/asr_batch.py run /absolute/path/to/media \
-  --base-url "$ASR_BASE_URL" --output-dir /absolute/path/to/transcripts \
+  --output-dir /absolute/path/to/transcripts \
   --purpose transcription --language auto --quality-profile legacy
 ```
 

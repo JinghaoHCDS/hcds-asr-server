@@ -28,7 +28,7 @@ from asr_server.observability import configure_logging, current_context, emit, s
 from asr_server.config import Settings, load_settings
 from asr_server.errors import AsrError, asr_error_handler, validation_error_handler
 from asr_server.jobs import JobManager
-from asr_server.skill import MarkdownResponse, skill_archive, skill_file
+from asr_server.skill import MarkdownResponse, skill_archive, skill_base_url, skill_document, skill_file
 from asr_server.lifecycle import ModelLifecycleManager
 from asr_server.registry import Backend, ModelDefinition, default_models
 from asr_server.engines import EngineRegistration, create_registered_adapter
@@ -182,13 +182,14 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         return get_swagger_ui_oauth2_redirect_html()
 
     @app.get("/skill", response_class=MarkdownResponse, tags=["documentation"])
-    async def official_agent_skill() -> MarkdownResponse:
+    async def official_agent_skill(request: Request) -> MarkdownResponse:
         """Read the official Agent workflow before using this ASR Server.
 
         Download /skill/lan-asr.zip for the guide and batch client together.
         Discover current model capabilities separately through GET /v1/models.
         """
-        return MarkdownResponse(skill_file("SKILL.md"))
+        base_url = skill_base_url(app_settings.public_base_url, str(request.base_url))
+        return MarkdownResponse(skill_document(base_url), headers={"Cache-Control": "no-store"})
 
     @app.get("/skill/asr_batch.py", response_class=PlainTextResponse, tags=["documentation"])
     async def official_skill_client() -> PlainTextResponse:
@@ -202,11 +203,12 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         "/skill/lan-asr.zip", response_class=Response, tags=["documentation"],
         responses={200: {"content": {"application/zip": {}}}},
     )
-    async def official_skill_download() -> Response:
+    async def official_skill_download(request: Request) -> Response:
         """Download the official Skill and its client from the same release."""
+        base_url = skill_base_url(app_settings.public_base_url, str(request.base_url))
         return Response(
-            skill_archive(), media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="lan-asr.zip"'},
+            skill_archive(base_url), media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="lan-asr.zip"', "Cache-Control": "no-store"},
         )
 
     @app.get("/docs/mcp", response_class=PlainTextResponse, tags=["documentation"])

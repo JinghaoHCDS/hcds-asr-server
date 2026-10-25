@@ -7,6 +7,7 @@ SOURCE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 DEPLOY_DIR="${ASR_DEPLOY_DIR:-${SOURCE_DIR}}"
 HOST="${ASR_HOST:-0.0.0.0}"
 PORT="${ASR_PORT:-18080}"
+PUBLIC_BASE_URL="${ASR_PUBLIC_BASE_URL:-}"
 ADAPTER="${ASR_ADAPTER:-qwen}"
 QWEN_BATCH_SIZE="${ASR_QWEN_BATCH_SIZE:-1}"
 IDLE_UNLOAD_SECONDS="${ASR_IDLE_UNLOAD_SECONDS:-180}"
@@ -51,6 +52,7 @@ Options:
   --deploy-dir DIR              Copy/deploy into DIR. Default: current checkout
   --host HOST                   Service host. Default: 0.0.0.0
   --port PORT                   Service port. Only 18080 is supported
+  --public-base-url URL         Address embedded in downloaded Skill ZIPs; default: download origin
   --adapter NAME                qwen (legacy alias), registered, or mock. Default: qwen
   --idle-unload-seconds SECONDS Unload an idle loaded model after this many seconds. Default: 180
   --mock                        Deploy mock adapter and skip GPU/Qwen checks
@@ -95,6 +97,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --port)
       PORT="${2:?missing value for --port}"
+      shift 2
+      ;;
+    --public-base-url)
+      PUBLIC_BASE_URL="${2:?missing value for --public-base-url}"
       shift 2
       ;;
     --adapter)
@@ -189,6 +195,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "${PORT}" == "18080" ]] || die "the only supported LAN API port is 18080"
+[[ -z "${PUBLIC_BASE_URL}" || "${PUBLIC_BASE_URL}" == http://* || "${PUBLIC_BASE_URL}" == https://* ]] || die "public-base-url must be an http(s) URL"
+[[ "${PUBLIC_BASE_URL}" != *$'\n'* && "${PUBLIC_BASE_URL}" != *$'\r'* ]] || die "public-base-url must not contain newlines"
 [[ "${ADAPTER}" == "qwen" || "${ADAPTER}" == "registered" || "${ADAPTER}" == "mock" ]] || die "adapter must be qwen, registered, or mock"
 [[ "${HOST}" == "0.0.0.0" || "${HOST}" == "127.0.0.1" ]] || die "host must be 0.0.0.0 (LAN) or 127.0.0.1 (local only)"
 [[ "${IDLE_UNLOAD_SECONDS}" =~ ^[0-9]+$ ]] || die "idle-unload-seconds must be a non-negative integer"
@@ -423,13 +431,13 @@ install_user_service() {
   "${DEPLOY_DIR}/.venv/bin/python" - \
     "${DEPLOY_DIR}/deploy/asr-server.service" "${tmp_file}" \
     "${DEPLOY_DIR}" "${HOST}" "${PORT}" "${ADAPTER}" "${QWEN_BATCH_SIZE}" \
-    "${IDLE_UNLOAD_SECONDS}" "${HF_HUB_OFFLINE}" "${TRANSFORMERS_OFFLINE}" <<'PY'
+    "${IDLE_UNLOAD_SECONDS}" "${HF_HUB_OFFLINE}" "${TRANSFORMERS_OFFLINE}" "${PUBLIC_BASE_URL}" <<'PY'
 import re
 import sys
 from pathlib import Path
 
 template, output, *values = sys.argv[1:]
-names = ("PROJECT_DIR", "HOST", "PORT", "ADAPTER", "QWEN_BATCH_SIZE", "IDLE_UNLOAD_SECONDS", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
+names = ("PROJECT_DIR", "HOST", "PORT", "ADAPTER", "QWEN_BATCH_SIZE", "IDLE_UNLOAD_SECONDS", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "PUBLIC_BASE_URL")
 
 def escape(value):
     # systemd expands % specifiers even in quoted paths.

@@ -124,6 +124,14 @@ def test_offline_service_is_explicit(tmp_path: Path) -> None:
     assert "Environment=TRANSFORMERS_OFFLINE=1" in unit
 
 
+def test_deployment_persists_advertised_skill_address(tmp_path: Path) -> None:
+    checkout, environment, _ = deployment_sandbox(tmp_path)
+    result = run_deploy(checkout, environment, "--mock", "--public-base-url", "http://my-asr.lan:18080", "--no-start")
+    assert result.returncode == 0, result.stderr
+    unit = (Path(environment["HOME"]) / ".config/systemd/user/asr-server.service").read_text()
+    assert 'Environment="ASR_PUBLIC_BASE_URL=http://my-asr.lan:18080"' in unit
+
+
 @pytest.mark.parametrize(("os_name", "kernel"), [("Darwin", "local-test"), ("Linux", "6.12-generic")])
 @pytest.mark.parametrize("adapter", ["qwen", "registered"])
 def test_real_gpu_deploy_fails_before_mutation_outside_wsl(tmp_path: Path, os_name: str, kernel: str, adapter: str) -> None:

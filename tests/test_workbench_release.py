@@ -47,6 +47,7 @@ def test_bundle_uses_allowlist_and_hash_manifest(tmp_path: Path) -> None:
     (root / "skills/lan-asr/SKILL.md").write_text("# Official Skill\n")
     (root / "skills/lan-asr/scripts/asr_batch.py").write_text("print('client')\n")
     (root / "skills/lan-asr/.env").write_text("skill-secret")
+    (root / "skills/lan-asr/server.json").write_text('{"base_url":"http://private-host:18080"}')
     output = tmp_path / "release.tar.gz"
     result = bundle(output, root)
     assert result["sha256"] == digest(output)
@@ -56,6 +57,7 @@ def test_bundle_uses_allowlist_and_hash_manifest(tmp_path: Path) -> None:
         assert "asr_server/main.py" in names
         assert "skills/lan-asr/SKILL.md" in names
         assert "skills/lan-asr/scripts/asr_batch.py" in names
+        assert "skills/lan-asr/server.json" not in names
         assert all("node_modules" not in name and "__pycache__" not in name and ".env" not in name for name in names)
         assert "token.txt" not in names
         assert "data/private.wav" not in names

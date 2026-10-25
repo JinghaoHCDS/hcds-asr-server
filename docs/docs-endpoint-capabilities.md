@@ -12,12 +12,19 @@ for model discovery.
 `GET /skill` returns Markdown with capability selection, authentication,
 ordinary transcription, real alignment, speaker segments, asynchronous jobs,
 result retrieval, cancellation, recovery and quality limitations.
-It is served from this release's `skills/lan-asr/SKILL.md`.
+It is rendered from this release's `skills/lan-asr/SKILL.md`, adding this
+deployment's server address.
 
 [Download the complete Skill and batch client](/skill/lan-asr.zip), or read
 [the Python client source](/skill/asr_batch.py). The client uses Python 3.12+
 and the standard library, takes a configurable server address, and preserves
-local batch state. Downloading does not install or execute it.
+local batch state. The ZIP also includes `server.json` with an automatically
+selected server address: a usable `ASR_PUBLIC_BASE_URL`, or the actual download
+origin when that setting is empty, loopback or a wildcard. No credential is
+included. The client uses this address after explicit CLI/environment overrides
+and before an older machine-wide default. Keep server.json with the installed
+Skill; standalone script downloads do not include it. Downloading does not
+install or execute the client.
 
 Use `/skill` for the workflow, `/openapi.json` for exact API schemas, and
 `/v1/models` for actual enabled models, backends and capabilities. All three

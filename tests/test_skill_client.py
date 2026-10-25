@@ -253,6 +253,26 @@ def test_base_url_precedence_and_localhost_fallback(skill: ModuleType, tmp_path:
     assert skill.resolve_base_url("http://explicit:18080") == "http://explicit:18080"
 
 
+def test_bundled_deployment_address_wins_over_old_machine_default(
+    skill: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundled = tmp_path / "server.json"
+    local = tmp_path / "config.json"
+    bundled.write_text('{"base_url":"http://downloaded-server:18080"}')
+    local.write_text('{"base_url":"http://old-server:18080"}')
+    monkeypatch.setattr(skill, "BUNDLED_CONFIG", bundled)
+    monkeypatch.setattr(skill, "DEFAULT_CONFIG", local)
+    monkeypatch.delenv("ASR_BASE_URL", raising=False)
+    assert skill.resolve_base_url(None) == "http://downloaded-server:18080"
+    monkeypatch.setenv("ASR_BASE_URL", "http://environment:18080")
+    assert skill.resolve_base_url(None) == "http://environment:18080"
+    assert skill.resolve_base_url("http://explicit:18080") == "http://explicit:18080"
+    monkeypatch.delenv("ASR_BASE_URL")
+    bundled.write_text("broken JSON")
+    with pytest.raises(ValueError, match="invalid JSON"):
+        skill.resolve_base_url(None)
+
+
 @pytest.mark.parametrize("content", ['{"base_url":', '[]', '{"base_url":null}', '{"base_url":"file:///audio"}'])
 def test_invalid_config_fails_only_when_run_needs_it(skill: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str) -> None:
     config = tmp_path / "config.json"

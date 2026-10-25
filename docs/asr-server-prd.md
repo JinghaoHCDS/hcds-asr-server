@@ -1,8 +1,10 @@
 # WSL ASR Server PRD
 
 2026-10-25 Agent Skill 扩展：官方 `lan-asr` 来源为 `skills/lan-asr/`。
-`GET /skill` 公开返回同一份 Markdown 指南，`GET /skill/lan-asr.zip`
-公开下载指南及客户端，`GET /skill/asr_batch.py` 返回客户端源文件。
+`GET /skill` 公开返回同源 Markdown 指南并注入部署地址，`GET /skill/lan-asr.zip`
+公开下载指南、客户端及自动生成的 `server.json`，`GET /skill/asr_batch.py` 返回客户端源文件。
+随包地址优先取 `ASR_PUBLIC_BASE_URL`；空值、loopback 或通配监听地址则取实际下载 URL。
+不将个人 IP 写入仓库模板，不分发凭据；客户端可用命令行或环境变量覆盖随包地址。
 `/docs` 和 `/openapi.json` 描述中提供发现入口；真实能力继续以 `/v1/models`
 为准。此扩展不改变 `/v1` 鉴权、内存任务、质量默认值或工作台个人任务隔离。
 

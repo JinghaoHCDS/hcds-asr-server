@@ -126,7 +126,7 @@ Agent 先读取服务自身的使用指南，再用 `/openapi.json` 获取接口
 | 地址 | 用途 |
 | --- | --- |
 | `/skill` | Markdown 使用指南，覆盖鉴权、模型选择、转录、对齐、说话人分段、轮询、恢复和取消 |
-| `/skill/lan-asr.zip` | 完整 Skill 与 Python 批量客户端，供安装到其他 Agent |
+| `/skill/lan-asr.zip` | 完整 Skill、Python 批量客户端及自动填入部署地址的 `server.json`，供安装到其他 Agent |
 | `/skill/asr_batch.py` | 同版本批量客户端源文件 |
 
 `/docs` 的初始 HTML 和 `/openapi.json` 的描述都链接到 `/skill`，
@@ -140,11 +140,19 @@ curl --noproxy '*' -fS "$ASR_URL/skill/lan-asr.zip" -o lan-asr.zip
 ```
 
 把包内 `lan-asr/` 放入所用 Agent 的 Skill 目录即可；已有共享安装使用
-`~/.Agent/skills/lan-asr/`。先检查文件，升级时保留
+`~/.Agent/skills/lan-asr/`。**保留包内 `server.json`，下载后即可自动连接对应部署，无需手填 IP。**
+先检查文件，升级时保留
 `~/.Agent/state/lan-asr/` 中的批次数据库。仓库用户也可直接复制
 `skills/lan-asr/`。客户端使用 Python 3.12+ 标准库，通过 `ASR_BASE_URL`
-或 `--base-url` 指定服务器，也可把 `base_url` 保存在本地
-`~/.Agent/state/lan-asr/config.json`；HTTP 文档中的 Skill、下载包与本地安装内容同源。
+或 `--base-url` 覆盖服务器；也可把 `base_url` 保存在本地
+`~/.Agent/state/lan-asr/config.json` 作为没有随包地址时的默认值。
+优先级为命令行、环境变量、随包地址、本机默认值、loopback。HTTP 文档中的 Skill 与下载包同源，
+服务会额外注入本部署地址；仓库模板不包含个人 IP。
+
+默认使用实际下载网址生成随包地址，兼容 WSL mirrored/NAT 下的客户端访问入口。
+需要固定公布地址时，在部署配置中设置 `ASR_PUBLIC_BASE_URL=http://YOUR_WINDOWS_LAN_IP:18080`，
+或使用部署参数 `--public-base-url`；项目 `.env` 的设置优先于生成的 service unit。
+空值、loopback 或通配监听地址会回退到实际下载网址。IP 改变后重新下载包或显式覆盖即可。
 
 **先读 `GET /v1/models`，再选择当前服务声明的模型与能力。** 真实后端为 Hugging Face `transformers`，MOSS 和 Qwen 对齐需分别验收并启用。
 

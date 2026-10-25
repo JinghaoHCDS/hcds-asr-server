@@ -25,6 +25,7 @@ AUDIO_SUFFIXES = {".aac", ".flac", ".m4a", ".mkv", ".mov", ".mp3", ".mp4", ".ogg
 DEFAULT_BASE_URL = "http://127.0.0.1:18080"
 DEFAULT_DB = Path.home() / ".Agent" / "state" / "lan-asr" / "batches.sqlite"
 DEFAULT_CONFIG = DEFAULT_DB.with_name("config.json")
+BUNDLED_CONFIG = Path(__file__).resolve().parents[1] / "server.json"
 TERMINAL = {"completed", "failed", "cancelled"}
 
 
@@ -43,27 +44,31 @@ def now() -> str:
 
 
 def resolve_base_url(explicit: str | None) -> str:
-    """Read non-secret client configuration only when creating a new batch."""
+    """Read non-secret deployment/client config only for a new batch."""
     if explicit is not None:
         value = explicit
     elif os.getenv("ASR_BASE_URL"):
         value = os.environ["ASR_BASE_URL"]
     else:
-        try:
-            content = DEFAULT_CONFIG.read_text(encoding="utf-8")
-        except FileNotFoundError:
+        value = None
+        for path in (BUNDLED_CONFIG, DEFAULT_CONFIG):
+            try:
+                content = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                continue
+            except (OSError, UnicodeError) as exc:
+                raise ValueError(f"could not read ASR client config: {path}") from exc
+            try:
+                config = json.loads(content)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSON in ASR client config: {path}") from exc
+            if not isinstance(config, dict):
+                raise ValueError("ASR client config must be a JSON object")
+            if "base_url" in config:
+                value = config["base_url"]
+                break
+        else:
             return DEFAULT_BASE_URL
-        except (OSError, UnicodeError) as exc:
-            raise ValueError(f"could not read ASR client config: {DEFAULT_CONFIG}") from exc
-        try:
-            config = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSON in ASR client config: {DEFAULT_CONFIG}") from exc
-        if not isinstance(config, dict):
-            raise ValueError("ASR client config must be a JSON object")
-        if "base_url" not in config:
-            return DEFAULT_BASE_URL
-        value = config["base_url"]
     if not isinstance(value, str) or not value.strip():
         raise ValueError("ASR base_url must be a non-empty http(s) URL")
     value = value.strip()
@@ -631,7 +636,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("source", type=Path)
     run.add_argument("--output-dir", type=Path)
     run.add_argument("--include", action="append", default=[])
-    run.add_argument("--base-url", help="Server URL; overrides ASR_BASE_URL and the optional client config.json")
+    run.add_argument("--base-url", help="Server URL; overrides ASR_BASE_URL, bundled server.json and local config.json")
     run.add_argument("--model")
     run.add_argument("--language", default="auto")
     run.add_argument("--purpose", choices=("transcription", "oral_analysis", "podcast"), default="transcription")
