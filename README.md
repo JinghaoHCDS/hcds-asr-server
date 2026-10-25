@@ -8,7 +8,7 @@
 
 模型在 Windows 的 WSL 中运行，音频与工作台数据保存在自己的服务器。客户端通过网页、HTTP 或本地 MCP bridge 使用，无需安装 CUDA 或下载模型。
 
-[工作台](#使用工作台) · [长转录编辑](#长转录也保持一屏工作区) · [部署](#首次部署) · [Agent 接入](#接入-agent) · [验证边界](#验证与边界)
+[工作台](#使用工作台) · [长转录编辑](#长转录也保持一屏工作区) · [部署](#首次部署) · [官方 Skill](#官方-skill从服务读取用法) · [Agent 接入](#接入-agent) · [验证边界](#验证与边界)
 
 ![新版声笺工作台：雾蓝与纸白的素材区，上传音视频、选择领域并填写热词。](docs/validation-artifacts/2026-10-25-workbench-ui/upload-final.png)
 
@@ -116,6 +116,35 @@ curl --noproxy '*' -fsS "$ASR_URL/v1/models"
 打开同一地址的 `/`，登录并上传一段音频，在结果页回听、校对和导出。`/docs` 提供交互式 API 文档；服务器本机可用 `http://127.0.0.1:18080`。若已启用 `ASR_API_TOKEN`，访问 `/v1/**` 需携带 Bearer Token。
 
 ## 接入 Agent
+
+### 官方 Skill：从服务读取用法
+
+**官方 Skill：[仓库文件](skills/lan-asr/SKILL.md)，部署后可直接请求 `GET /skill`。**
+Agent 先读取服务自身的使用指南，再用 `/openapi.json` 获取接口结构、
+`/v1/models` 发现实际能力。`/docs` 也提供 Skill 入口。
+
+| 地址 | 用途 |
+| --- | --- |
+| `/skill` | Markdown 使用指南，覆盖鉴权、模型选择、转录、对齐、说话人分段、轮询、恢复和取消 |
+| `/skill/lan-asr.zip` | 完整 Skill 与 Python 批量客户端，供安装到其他 Agent |
+| `/skill/asr_batch.py` | 同版本批量客户端源文件 |
+
+`/docs` 的初始 HTML 和 `/openapi.json` 的描述都链接到 `/skill`，
+Agent 无需执行网页 JavaScript 即可发现入口。这些文档端点公开可读；
+实际 `/v1/**` 请求仍遵循服务的 Bearer 鉴权配置。
+
+```bash
+curl --noproxy '*' -fsS "$ASR_URL/skill"
+# 完整下载包同时包含指南与 Python 批量客户端
+curl --noproxy '*' -fS "$ASR_URL/skill/lan-asr.zip" -o lan-asr.zip
+```
+
+把包内 `lan-asr/` 放入所用 Agent 的 Skill 目录即可；已有共享安装使用
+`~/.Agent/skills/lan-asr/`。先检查文件，升级时保留
+`~/.Agent/state/lan-asr/` 中的批次数据库。仓库用户也可直接复制
+`skills/lan-asr/`。客户端使用 Python 3.12+ 标准库，通过 `ASR_BASE_URL`
+或 `--base-url` 指定服务器，也可把 `base_url` 保存在本地
+`~/.Agent/state/lan-asr/config.json`；HTTP 文档中的 Skill、下载包与本地安装内容同源。
 
 **先读 `GET /v1/models`，再选择当前服务声明的模型与能力。** 真实后端为 Hugging Face `transformers`，MOSS 和 Qwen 对齐需分别验收并启用。
 

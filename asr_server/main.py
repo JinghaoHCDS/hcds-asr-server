@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 import socket
 import importlib
+from html import escape
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,7 +13,8 @@ from typing import Annotated, Any, cast
 
 from fastapi import Body, FastAPI, File, Form, UploadFile, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.openapi.docs import get_swagger_ui_html, get_swagger_ui_oauth2_redirect_html
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from asr_server import __version__
@@ -26,6 +28,7 @@ from asr_server.observability import configure_logging, current_context, emit, s
 from asr_server.config import Settings, load_settings
 from asr_server.errors import AsrError, asr_error_handler, validation_error_handler
 from asr_server.jobs import JobManager
+from asr_server.skill import MarkdownResponse, skill_archive, skill_file
 from asr_server.lifecycle import ModelLifecycleManager
 from asr_server.registry import Backend, ModelDefinition, default_models
 from asr_server.engines import EngineRegistration, create_registered_adapter
@@ -124,6 +127,7 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         title="WSL ASR Server",
         version=__version__,
         description=docs_description(),
+        docs_url=None,
         lifespan=lifespan,
     )
     app.router.route_class = AdmissionRoute
@@ -153,6 +157,57 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
             "gpu": app.state.gpu_snapshot,
             "gpu_snapshot_at": app.state.gpu_snapshot_at,
         }
+
+    @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
+    async def agent_aware_swagger_docs(request: Request) -> HTMLResponse:
+        root_path = request.scope.get("root_path", "").rstrip("/")
+        swagger = get_swagger_ui_html(
+            openapi_url=f"{root_path}{app.openapi_url}",
+            title=f"{app.title} - Swagger UI",
+            oauth2_redirect_url=f"{root_path}/docs/oauth2-redirect",
+        )
+        # This link is in the initial HTML too: a fetch-only Agent does not
+        # need to execute Swagger's JavaScript to discover the Skill.
+        skill_url = escape(f"{root_path}/skill", quote=True)
+        schema_url = escape(f"{root_path}{app.openapi_url}", quote=True)
+        navigation = (
+            '<nav aria-label="Agent documentation" style="padding:16px 24px;font:16px sans-serif">'
+            f'<a href="{skill_url}">Official LAN ASR Agent Skill (Markdown)</a>'
+            f' · <a href="{schema_url}">OpenAPI JSON</a></nav>'
+        )
+        return HTMLResponse(bytes(swagger.body).decode("utf-8").replace("<body>", f"<body>{navigation}", 1))
+
+    @app.get("/docs/oauth2-redirect", response_class=HTMLResponse, include_in_schema=False)
+    async def swagger_oauth2_redirect() -> HTMLResponse:
+        return get_swagger_ui_oauth2_redirect_html()
+
+    @app.get("/skill", response_class=MarkdownResponse, tags=["documentation"])
+    async def official_agent_skill() -> MarkdownResponse:
+        """Read the official Agent workflow before using this ASR Server.
+
+        Download /skill/lan-asr.zip for the guide and batch client together.
+        Discover current model capabilities separately through GET /v1/models.
+        """
+        return MarkdownResponse(skill_file("SKILL.md"))
+
+    @app.get("/skill/asr_batch.py", response_class=PlainTextResponse, tags=["documentation"])
+    async def official_skill_client() -> PlainTextResponse:
+        """Download the official dependency-free Python batch client as source."""
+        return PlainTextResponse(
+            skill_file("scripts/asr_batch.py"),
+            headers={"Content-Disposition": 'attachment; filename="asr_batch.py"'},
+        )
+
+    @app.get(
+        "/skill/lan-asr.zip", response_class=Response, tags=["documentation"],
+        responses={200: {"content": {"application/zip": {}}}},
+    )
+    async def official_skill_download() -> Response:
+        """Download the official Skill and its client from the same release."""
+        return Response(
+            skill_archive(), media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="lan-asr.zip"'},
+        )
 
     @app.get("/docs/mcp", response_class=PlainTextResponse, tags=["documentation"])
     async def mcp_setup_tutorial() -> PlainTextResponse:

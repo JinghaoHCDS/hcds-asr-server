@@ -1,5 +1,12 @@
 # 代理开发指南
 
+## 官方 Agent Skill
+
+- `skills/lan-asr/` 是官方客户端 Skill 的维护来源，沿用现有名称 `lan-asr`。
+- `GET /skill` 返回其中的 `SKILL.md`；`/skill/lan-asr.zip` 和 `/skill/asr_batch.py` 分发同版本客户端。`/docs`、OpenAPI、README 和客户端提示词均链接该入口。
+- 变更调用协议时同步官方 Skill 及配套客户端；文档不能替代 `/v1/models` 的运行时能力发现。发行包必须包含 `skills/lan-asr/`。
+- Skill 不绑定个人 LAN IP；本地安装通过 `ASR_BASE_URL` 或 `--base-url` 配置地址。升级客户端保留既有批次数据库和请求快照。
+
 ## 2026-10-25 平台扩展契约
 
 [平台运行契约](docs/asr-platform-runtime.md)补充本文件及PRD：同步、异步、工作台、编辑对齐和load共用有界FIFO；解析前正文准入与受控spool；有界PCM解码及可信资产复用；SQLite schema 3摘要/正文/chunk分离；JSONL关联诊断和内部引擎注册。旧身份隔离、保留期、默认quality_profile及模型质量门槛保持不变。预取默认关闭，性能与GPU验收以实际记录为准。

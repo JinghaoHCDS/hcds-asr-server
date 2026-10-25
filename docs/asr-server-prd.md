@@ -1,5 +1,11 @@
 # WSL ASR Server PRD
 
+2026-10-25 Agent Skill 扩展：官方 `lan-asr` 来源为 `skills/lan-asr/`。
+`GET /skill` 公开返回同一份 Markdown 指南，`GET /skill/lan-asr.zip`
+公开下载指南及客户端，`GET /skill/asr_batch.py` 返回客户端源文件。
+`/docs` 和 `/openapi.json` 描述中提供发现入口；真实能力继续以 `/v1/models`
+为准。此扩展不改变 `/v1` 鉴权、内存任务、质量默认值或工作台个人任务隔离。
+
 2026-10-25 平台实现扩展：解析前资源准入、统一同步/异步推理 FIFO、一次归一化资产、schema 3 摘要分页与正文分离、关联日志及显式引擎注册，以[平台运行契约](asr-platform-runtime.md)为准。真实 GPU 与质量验收状态见对应验收记录。
 
 更新时间：2026-10-22

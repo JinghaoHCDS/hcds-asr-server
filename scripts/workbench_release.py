@@ -26,7 +26,7 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "manifest.json"
 SOURCE_DIRECTORIES = (
     "asr_server", "asr_mcp", "scripts", "tests", "docs", "requirements", "deploy",
-    "prompts", "assets/readme", "evaluation", "frontend/src", "frontend/dist",
+    "prompts", "assets/readme", "evaluation", "frontend/src", "frontend/dist", "skills/lan-asr",
 )
 SOURCE_FILES = (
     "AGENTS.md", "CLAUDE.md", "README.md", "pyproject.toml", "uv.lock", ".env.example", ".gitignore",

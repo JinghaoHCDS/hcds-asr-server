@@ -1,5 +1,8 @@
 # Agent 侧 MCP Bridge
 
+完整 Agent 调用流程见服务的 [`/skill`](/skill)（[仓库来源](../skills/lan-asr/SKILL.md)）。
+它同时覆盖直接 HTTP 和批量客户端；本文补充 stdio MCP 的安装与配置。
+
 MCP bridge 运行在 Agent 所在客户端（已实机验证 Mac；其他平台尚待验收），通过 stdio 向 MCP Host 提供工具，再使用现有 HTTP API 把音频上传到 WSL ASR Gateway。它不运行模型、不安装 CUDA，也不新增局域网端口。
 
 ```text
