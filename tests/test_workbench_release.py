@@ -43,11 +43,13 @@ def test_bundle_uses_allowlist_and_hash_manifest(tmp_path: Path) -> None:
     (root / "asr_server/__pycache__").mkdir()
     (root / "asr_server/__pycache__/x.pyc").write_bytes(b"cache")
     (root / "asr_server/.env").write_text("nested-secret")
-    (root / "skills/lan-asr/scripts").mkdir(parents=True)
-    (root / "skills/lan-asr/SKILL.md").write_text("# Official Skill\n")
-    (root / "skills/lan-asr/scripts/asr_batch.py").write_text("print('client')\n")
-    (root / "skills/lan-asr/.env").write_text("skill-secret")
-    (root / "skills/lan-asr/server.json").write_text('{"base_url":"http://private-host:18080"}')
+    (root / "skills/hcds-lan-asr/scripts").mkdir(parents=True)
+    (root / "skills/hcds-lan-asr/SKILL.md").write_text("# Official Skill\n")
+    (root / "skills/hcds-lan-asr/scripts/asr_batch.py").write_text("print('client')\n")
+    (root / "skills/hcds-lan-asr/.env").write_text("skill-secret")
+    (root / "skills/hcds-lan-asr/server.json").write_text('{"base_url":"http://private-host:18080"}')
+    (root / "skills/lan-asr").mkdir()
+    (root / "skills/lan-asr/SKILL.md").write_text("# Retired Skill\n")
     output = tmp_path / "release.tar.gz"
     result = bundle(output, root)
     assert result["sha256"] == digest(output)
@@ -55,9 +57,10 @@ def test_bundle_uses_allowlist_and_hash_manifest(tmp_path: Path) -> None:
         names = archive.getnames()
         assert "frontend/dist/index.html" in names
         assert "asr_server/main.py" in names
-        assert "skills/lan-asr/SKILL.md" in names
-        assert "skills/lan-asr/scripts/asr_batch.py" in names
-        assert "skills/lan-asr/server.json" not in names
+        assert "skills/hcds-lan-asr/SKILL.md" in names
+        assert "skills/hcds-lan-asr/scripts/asr_batch.py" in names
+        assert "skills/hcds-lan-asr/server.json" not in names
+        assert "skills/lan-asr/SKILL.md" not in names
         assert all("node_modules" not in name and "__pycache__" not in name and ".env" not in name for name in names)
         assert "token.txt" not in names
         assert "data/private.wav" not in names

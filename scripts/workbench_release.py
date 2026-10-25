@@ -26,7 +26,7 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "manifest.json"
 SOURCE_DIRECTORIES = (
     "asr_server", "asr_mcp", "scripts", "tests", "docs", "requirements", "deploy",
-    "prompts", "assets/readme", "evaluation", "frontend/src", "frontend/dist", "skills/lan-asr",
+    "prompts", "assets/readme", "evaluation", "frontend/src", "frontend/dist", "skills/hcds-lan-asr",
 )
 SOURCE_FILES = (
     "AGENTS.md", "CLAUDE.md", "README.md", "pyproject.toml", "uv.lock", ".env.example", ".gitignore",
@@ -54,7 +54,7 @@ def digest(path: Path) -> str:
 def permitted(path: Path) -> bool:
     return not (
         set(path.parts) & EXCLUDED_PARTS
-        or path.as_posix() == "skills/lan-asr/server.json"
+        or path.as_posix() == "skills/hcds-lan-asr/server.json"
         or path.suffix in EXCLUDED_SUFFIXES
         or (path.name.startswith(".env") and path.name != ".env.example")
         or path.name in {".DS_Store", "service.lock", "token", "token.txt", "tokens.json", "secrets.json", "credentials.json", ".npmrc", ".netrc"}

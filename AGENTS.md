@@ -2,9 +2,9 @@
 
 ## 官方 Agent Skill
 
-- `skills/lan-asr/` 是官方客户端 Skill 的维护来源，沿用现有名称 `lan-asr`。
-- `GET /skill` 返回其中的 `SKILL.md`；`/skill/lan-asr.zip` 和 `/skill/asr_batch.py` 分发同版本客户端。`/docs`、OpenAPI、README 和客户端提示词均链接该入口。
-- 变更调用协议时同步官方 Skill 及配套客户端；文档不能替代 `/v1/models` 的运行时能力发现。发行包必须包含 `skills/lan-asr/`。
+- `skills/hcds-lan-asr/` 是官方客户端 Skill 的维护来源，正式名称为 `hcds-lan-asr`。
+- `GET /skill` 返回其中的 `SKILL.md`；`/skill/hcds-lan-asr.zip` 和 `/skill/asr_batch.py` 分发同版本客户端。`/docs`、OpenAPI、README 和客户端提示词均链接该入口。
+- 变更调用协议时同步官方 Skill 及配套客户端；文档不能替代 `/v1/models` 的运行时能力发现。发行包必须包含 `skills/hcds-lan-asr/`。
 - 仓库 Skill 模板不绑定个人 LAN IP；分发 ZIP 自动生成 `server.json`，地址优先取 `ASR_PUBLIC_BASE_URL`，空值/loopback/通配地址使用实际下载 URL。客户端优先命令行、环境变量、随包地址，再取本机配置及 loopback；升级保留既有批次数据库和请求快照。
 
 ## 2026-10-25 平台扩展契约
@@ -28,7 +28,7 @@
 
 这个仓库提供局域网 ASR 服务：Windows 主机的 NVIDIA GPU 在 WSL 中运行 Qwen3-ASR 与可选 MOSS，供局域网 Agent、应用和脚本通过 HTTP 或客户端 stdio MCP bridge 使用。
 
-产品部署默认使用当前 WSL checkout，推荐克隆到 `~/services/asr-server`，不要放在 `/mnt/c`。HTTP 客户端和 MCP 默认地址为 `http://127.0.0.1:18080`；远端 Agent 必须显式配置 Windows 主机的局域网地址。
+产品部署默认使用当前 WSL checkout，推荐克隆到 `~/services/hcds-asr-server`，不要放在 `/mnt/c`。HTTP 客户端和 MCP 默认地址为 `http://127.0.0.1:18080`；远端 Agent 必须显式配置 Windows 主机的局域网地址。
 
 历史已验收环境是 WSL2 Arch Linux + RTX 5070 Ti 16GB，原部署 `/home/fragt/services/asr-server`、原入口 `http://192.168.31.137:18080` 仅作为历史验证信息。不得把它们硬编码为新用户的运行前提。Ubuntu 依赖说明不等于已完成对应实机验收。
 
@@ -54,7 +54,7 @@ prompts/request-client-agent.md
 - 公共 API 必须和 `docs/asr-server-prd.md` 保持一致。
 - 使用 Python 3.12、uv、FastAPI 和 Uvicorn 实现服务。
 - 服务入口监听 `0.0.0.0:18080`。
-- WSL 项目位置不要放在 `/mnt/c`；推荐部署到 `~/services/asr-server`，部署脚本默认当前 checkout。
+- WSL 项目位置不要放在 `/mnt/c`；推荐部署到 `~/services/hcds-asr-server`，部署脚本默认当前 checkout。
 - 除非 PRD 明确变更，不要把 worker 端口 `8001` 暴露到局域网。
 - 不要把历史测试端口 `8765` 写入实现、部署、防火墙或启动配置。
 - API、生命周期管理、测试和第一条转录路径完成前，不要做 Web UI。
@@ -85,7 +85,7 @@ WSL 侧安装真实 Qwen3-ASR 前，必须先把 RTX 5070 Ti 的 PyTorch CUDA �
 推荐 WSL 安装顺序：
 
 ```bash
-cd ~/services/asr-server
+cd ~/services/hcds-asr-server
 
 uv python install 3.12
 uv sync

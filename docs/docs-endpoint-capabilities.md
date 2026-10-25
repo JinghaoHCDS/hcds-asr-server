@@ -8,14 +8,14 @@ for model discovery.
 
 ## Agent quick start: official Skill
 
-**Agents should read [the official LAN ASR Skill](/skill) first.**
+**Agents should read [the official hcds-lan-asr Skill](/skill) first.**
 `GET /skill` returns Markdown with capability selection, authentication,
 ordinary transcription, real alignment, speaker segments, asynchronous jobs,
 result retrieval, cancellation, recovery and quality limitations.
-It is rendered from this release's `skills/lan-asr/SKILL.md`, adding this
+It is rendered from this release's `skills/hcds-lan-asr/SKILL.md`, adding this
 deployment's server address.
 
-[Download the complete Skill and batch client](/skill/lan-asr.zip), or read
+[Download the complete Skill and batch client](/skill/hcds-lan-asr.zip), or read
 [the Python client source](/skill/asr_batch.py). The client uses Python 3.12+
 and the standard library, takes a configurable server address, and preserves
 local batch state. The ZIP also includes `server.json` with an automatically
@@ -71,7 +71,7 @@ through `GET /v1/models`.
 - `GET /docs/oauth2-redirect` is FastAPI's Swagger OAuth redirect helper.
 - `GET /docs/mcp` returns the client-side stdio MCP setup tutorial as Markdown.
 - `GET /skill` returns the official Agent Skill as Markdown; the complete
-  installable folder is available at `GET /skill/lan-asr.zip`.
+  installable folder is available at `GET /skill/hcds-lan-asr.zip`.
 - `/docs` is documentation only. It does not load models, unload models,
   transcribe audio, expose GPU state, or prove that a backend has passed
   runtime validation.
@@ -114,8 +114,8 @@ Enabled workbench `/api/**` routes are also listed in `/openapi.json`:
 | Method | Path | Implemented behavior |
 | --- | --- | --- |
 | `GET` | `/health` | Returns service status, version, host name, and best-effort local CUDA GPU visibility. |
-| `GET` | `/skill` | Returns the official LAN ASR Agent Skill as Markdown. |
-| `GET` | `/skill/lan-asr.zip` | Downloads the same Skill and its bundled Python batch client. |
+| `GET` | `/skill` | Returns the official hcds-lan-asr Agent Skill as Markdown. |
+| `GET` | `/skill/hcds-lan-asr.zip` | Downloads the same Skill and its bundled Python batch client. |
 | `GET` | `/skill/asr_batch.py` | Downloads the batch client as plain Python source. |
 | `GET` | `/docs/mcp` | Returns the MCP installation, security, MCP Host configuration, tool, and acceptance tutorial. |
 | `GET` | `/v1/models` | Lists declared models and their current runtime status and capabilities. By default this is the two Qwen3-ASR models; MOSS is listed only when explicitly enabled. |

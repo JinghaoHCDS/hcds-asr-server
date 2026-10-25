@@ -4,7 +4,7 @@
 
 已完成真实 GPU 验收的参考环境是 **WSL2 Arch Linux + RTX 5070 Ti 16 GB**。其他 NVIDIA 显卡需要在自己的机器上重新通过 CUDA 和模型 smoke；Ubuntu 下文提供依赖准备参考，尚未完成该发行版的项目 GPU 验收。
 
-部署后从局域网访问 `/skill/lan-asr.zip`，包内 `server.json` 会自动带上该部署的访问地址。
+部署后从局域网访问 `/skill/hcds-lan-asr.zip`，包内 `server.json` 会自动带上该部署的访问地址。
 默认从实际下载 URL 获取，避免把 WSL NAT 内部地址当作 Windows LAN 地址。
 需要固定公布地址时，可传 `--public-base-url http://YOUR_WINDOWS_LAN_IP:18080`，
 或在项目 `.env` 中设置 `ASR_PUBLIC_BASE_URL`（后者优先）。
@@ -39,15 +39,15 @@ nvidia-smi
 
 ## 2. 在 Linux HOME 里克隆
 
-安装到 WSL 原生文件系统，例如 `$HOME/services/asr-server`。部署脚本默认直接使用当前 checkout，支持不同用户名和目录，不向某个固定用户目录复制。
+安装到 WSL 原生文件系统，例如 `$HOME/services/hcds-asr-server`。部署脚本默认直接使用当前 checkout，支持不同用户名和目录，不向某个固定用户目录复制。
 
 Arch Linux：
 
 ```bash
 sudo pacman -Syu --needed git uv rsync ffmpeg libsndfile
 mkdir -p "$HOME/services"
-git clone https://github.com/JinghaoHCDS/asr_Server.git "$HOME/services/asr-server"
-cd "$HOME/services/asr-server"
+git clone https://github.com/JinghaoHCDS/hcds-asr-server.git "$HOME/services/hcds-asr-server"
+cd "$HOME/services/hcds-asr-server"
 ```
 
 Ubuntu 依赖准备参考（尚未 GPU 实测）：
@@ -257,7 +257,7 @@ sudo loginctl enable-linger "$USER"
 -NoProfile -ExecutionPolicy Bypass -File "C:\tools\asr\windows-start-asr.ps1" -Distro "archlinux" -LinuxUser "your-linux-user" -ProjectDir "/home/your-linux-user/services/asr-server"
 ```
 
-发行版名称来自 `wsl --list --verbose`；用户名和路径来自自己的 WSL。省略 `-Distro` 使用默认发行版，省略 `-LinuxUser` 使用该发行版默认用户，省略 `-ProjectDir` 使用该用户的 `$HOME/services/asr-server`。
+发行版名称来自 `wsl --list --verbose`；用户名和路径来自自己的 WSL。省略 `-Distro` 使用默认发行版，省略 `-LinuxUser` 使用该发行版默认用户，省略 `-ProjectDir` 使用该用户的 `$HOME/services/hcds-asr-server`。
 
 任务应允许长期运行、关闭自动运行时长上限，并设置已有实例运行时不启动新实例；可为失败配置一分钟后重试。Windows 脚本启动已经安装的 systemd unit，保留一个 WSL 前台等待进程，直到 unit 停止。仅启用 systemd 不能保证 WSL 实例一直存活，这是微软明确的 WSL 生命周期限制。手动调用且不需要保持进程时可传 `-NoKeepAlive`。[微软 systemd 生命周期说明](https://learn.microsoft.com/en-us/windows/wsl/systemd)
 

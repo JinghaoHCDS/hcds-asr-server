@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/readme/workbench-hero.svg" width="100%" alt="LAN ASR Server：在 Windows、NVIDIA 与 WSL 上运行局域网转录服务。上传音视频，经 Qwen 与真实对齐，回听改字，导出文字和字幕。">
+  <img src="assets/readme/workbench-hero.svg" width="100%" alt="HCDS ASR Server：在 Windows、NVIDIA 与 WSL 上运行局域网转录服务。上传音视频，经 Qwen 与真实对齐，回听改字，导出文字和字幕。">
 </p>
 
-# LAN ASR Server
+# HCDS ASR Server
 
 **用浏览器把音视频变成可校对的文字与字幕，也让局域网里的 Agent 共用同一台 GPU。**
 
@@ -62,8 +62,8 @@
 
 ```bash
 mkdir -p ~/services
-git clone https://github.com/JinghaoHCDS/asr_Server.git ~/services/asr-server
-cd ~/services/asr-server
+git clone https://github.com/JinghaoHCDS/hcds-asr-server.git ~/services/hcds-asr-server
+cd ~/services/hcds-asr-server
 
 npm --prefix frontend ci
 npm --prefix frontend run build
@@ -119,31 +119,31 @@ curl --noproxy '*' -fsS "$ASR_URL/v1/models"
 
 ### 官方 Skill：从服务读取用法
 
-**官方 Skill：[仓库文件](skills/lan-asr/SKILL.md)，部署后可直接请求 `GET /skill`。**
+**官方 Skill：[仓库文件](skills/hcds-lan-asr/SKILL.md)，部署后可直接请求 `GET /skill`。**
 Agent 先读取服务自身的使用指南，再用 `/openapi.json` 获取接口结构、
 `/v1/models` 发现实际能力。`/docs` 也提供 Skill 入口。
 
 | 地址 | 用途 |
 | --- | --- |
 | `/skill` | Markdown 使用指南，覆盖鉴权、模型选择、转录、对齐、说话人分段、轮询、恢复和取消 |
-| `/skill/lan-asr.zip` | 完整 Skill、Python 批量客户端及自动填入部署地址的 `server.json`，供安装到其他 Agent |
+| `/skill/hcds-lan-asr.zip` | 完整 Skill、Python 批量客户端及自动填入部署地址的 `server.json`，供安装到其他 Agent |
 | `/skill/asr_batch.py` | 同版本批量客户端源文件 |
 
 `/docs` 的初始 HTML 和 `/openapi.json` 的描述都链接到 `/skill`，
 Agent 无需执行网页 JavaScript 即可发现入口。这些文档端点公开可读；
-实际 `/v1/**` 请求仍遵循服务的 Bearer 鉴权配置。
+实际 `/v1/**` 请求仍遵循服务的 Bearer 鉴权配置。旧 `/skill/lan-asr.zip` 会跳转到新下载入口。
 
 ```bash
 curl --noproxy '*' -fsS "$ASR_URL/skill"
 # 完整下载包同时包含指南与 Python 批量客户端
-curl --noproxy '*' -fS "$ASR_URL/skill/lan-asr.zip" -o lan-asr.zip
+curl --noproxy '*' -fS "$ASR_URL/skill/hcds-lan-asr.zip" -o hcds-lan-asr.zip
 ```
 
-把包内 `lan-asr/` 放入所用 Agent 的 Skill 目录即可；已有共享安装使用
-`~/.Agent/skills/lan-asr/`。**保留包内 `server.json`，下载后即可自动连接对应部署，无需手填 IP。**
+把包内 `hcds-lan-asr/` 放入所用 Agent 的 Skill 目录即可；已有共享安装使用
+`~/.Agent/skills/hcds-lan-asr/`。**保留包内 `server.json`，下载后即可自动连接对应部署，无需手填 IP。**
 先检查文件，升级时保留
-`~/.Agent/state/lan-asr/` 中的批次数据库。仓库用户也可直接复制
-`skills/lan-asr/`。客户端使用 Python 3.12+ 标准库，通过 `ASR_BASE_URL`
+`~/.Agent/state/lan-asr/` 中的批次数据库（改名后继续复用此目录）。仓库用户也可直接复制
+`skills/hcds-lan-asr/`。客户端使用 Python 3.12+ 标准库，通过 `ASR_BASE_URL`
 或 `--base-url` 覆盖服务器；也可把 `base_url` 保存在本地
 `~/.Agent/state/lan-asr/config.json` 作为没有随包地址时的默认值。
 优先级为命令行、环境变量、随包地址、本机默认值、loopback。HTTP 文档中的 Skill 与下载包同源，
@@ -153,6 +153,9 @@ curl --noproxy '*' -fS "$ASR_URL/skill/lan-asr.zip" -o lan-asr.zip
 需要固定公布地址时，在部署配置中设置 `ASR_PUBLIC_BASE_URL=http://YOUR_WINDOWS_LAN_IP:18080`，
 或使用部署参数 `--public-base-url`；项目 `.env` 的设置优先于生成的 service unit。
 空值、loopback 或通配监听地址会回退到实际下载网址。IP 改变后重新下载包或显式覆盖即可。
+
+从旧 `lan-asr` 升级时，把新包安装到 `hcds-lan-asr/`，移除旧 Skill 入口，
+并将工作流中旧脚本路径改为新目录。批次数据库及原提交幂等命名空间继续复用，不需要迁移任务。
 
 **先读 `GET /v1/models`，再选择当前服务声明的模型与能力。** 真实后端为 Hugging Face `transformers`，MOSS 和 Qwen 对齐需分别验收并启用。
 
@@ -201,10 +204,10 @@ curl --noproxy '*' -fsS "$ASR_URL/v1/jobs/JOB_ID?detail=full"
 ```json
 {
   "mcpServers": {
-    "lan-asr": {
+    "hcds-lan-asr": {
       "command": "uv",
       "args": [
-        "run", "--directory", "/path/to/asr_Server",
+        "run", "--directory", "/path/to/hcds-asr-server",
         "--extra", "mcp", "python", "-m", "asr_mcp.server"
       ],
       "env": {

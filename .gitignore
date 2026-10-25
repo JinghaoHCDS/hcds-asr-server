@@ -27,7 +27,7 @@ frontend/dist/
 *.tsbuildinfo
 
 # Deployment-specific client config is generated in Skill downloads.
-/skills/lan-asr/server.json
+/skills/hcds-lan-asr/server.json
 
 # Editor
 .idea/

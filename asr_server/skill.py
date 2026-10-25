@@ -13,7 +13,7 @@ from fastapi.responses import PlainTextResponse
 from asr_server.errors import AsrError
 
 
-SKILL_ROOT = Path(__file__).resolve().parent.parent / "skills" / "lan-asr"
+SKILL_ROOT = Path(__file__).resolve().parent.parent / "skills" / "hcds-lan-asr"
 SKILL_FILES = ("SKILL.md", "scripts/asr_batch.py")
 
 
@@ -29,7 +29,7 @@ def skill_file(relative: str) -> bytes:
         return (SKILL_ROOT / relative).read_bytes()
     except OSError as exc:
         raise AsrError(
-            503, "skill_unavailable", "official LAN ASR Skill is missing from this release"
+            503, "skill_unavailable", "official hcds-lan-asr Skill is missing from this release"
         ) from exc
 
 
@@ -82,6 +82,6 @@ def skill_archive(base_url: str) -> bytes:
     with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
         for relative in SKILL_FILES:
             content = skill_document(base_url) if relative == "SKILL.md" else skill_file(relative)
-            archive.writestr(f"lan-asr/{relative}", content)
-        archive.writestr("lan-asr/server.json", json.dumps({"base_url": base_url}, indent=2) + "\n")
+            archive.writestr(f"hcds-lan-asr/{relative}", content)
+        archive.writestr("hcds-lan-asr/server.json", json.dumps({"base_url": base_url}, indent=2) + "\n")
     return output.getvalue()

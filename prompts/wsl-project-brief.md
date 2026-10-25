@@ -19,7 +19,7 @@ http://YOUR_WINDOWS_LAN_IP:18080
 WSL 内项目目录：
 
 ```text
-~/services/asr-server
+~/services/hcds-asr-server
 ```
 
 不要把项目部署在 `/mnt/c`。不要使用历史测试端口 `8765`。
@@ -157,7 +157,7 @@ MOSS `auto` 在已验证的 30 分钟级窗口内使用 native long-form，超�
 
 建议执行顺序：
 
-1. 在 `~/services/asr-server` 准备项目。
+1. 在 `~/services/hcds-asr-server` 准备项目。
 2. `uv sync`
 3. `uv run pytest -q`
 4. `uv run mypy asr_server tests scripts`

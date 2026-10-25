@@ -18,7 +18,7 @@ import pytest
 @pytest.fixture
 def skill() -> ModuleType:
     name = "lan_asr_skill_client"
-    path = Path(__file__).resolve().parents[1] / "skills/lan-asr/scripts/asr_batch.py"
+    path = Path(__file__).resolve().parents[1] / "skills/hcds-lan-asr/scripts/asr_batch.py"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

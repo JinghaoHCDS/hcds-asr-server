@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title desc">
-  <title id="title">LAN ASR Server — 从音视频，到可交付的文字</title>
+  <title id="title">HCDS ASR Server — 从音视频，到可交付的文字</title>
   <desc id="desc">Windows、NVIDIA 与 WSL 提供局域网转录工作台和 Agent API。上传音视频，通过 Qwen 与对齐器转录，回听改字，导出 TXT、SRT、VTT 或 JSON。这里展示功能流程，不是实际推理进度。</desc>
   <rect width="1200" height="380" rx="24" fill="#F7F7F4"/>
   <g font-family="MiSans,PingFang SC,Microsoft YaHei,sans-serif">
     <g id="project-title" fill="#343A46">
       <text x="56" y="49" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="20" letter-spacing="2" fill="#787C83">WINDOWS / NVIDIA / WSL</text>
-      <text x="51" y="139" font-size="82" font-weight="750" letter-spacing="-3">LAN ASR SERVER</text>
+      <text x="51" y="139" font-size="82" font-weight="750" letter-spacing="-3">HCDS ASR SERVER</text>
       <text x="56" y="198" font-size="36" font-weight="500">从音视频，到可校对、可交付的文字。</text>
     </g>
     <g id="voice-mark" stroke="#0C91FA" stroke-width="8" stroke-linecap="round" fill="none">

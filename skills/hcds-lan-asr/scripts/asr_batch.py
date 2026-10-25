@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small, dependency-free batch client for the LAN ASR gateway."""
+"""Small, dependency-free batch client for the HCDS ASR Server."""
 
 from __future__ import annotations
 
@@ -630,7 +630,7 @@ def cancel_batch(db: sqlite3.Connection, batch_id: str) -> None:
 def parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--db", type=Path, default=DEFAULT_DB)
-    root = argparse.ArgumentParser(description="Batch local files through the LAN ASR gateway.")
+    root = argparse.ArgumentParser(description="Batch local files through the HCDS ASR Server.")
     commands = root.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", parents=[common])
     run.add_argument("source", type=Path)
@@ -685,5 +685,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except (ApiError, RuntimeError, ValueError, OSError, sqlite3.Error) as exc:
-        print(f"lan-asr: {exc}", file=sys.stderr)
+        print(f"hcds-lan-asr: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

@@ -1,7 +1,7 @@
-# WSL ASR Server PRD
+# HCDS ASR Server PRD
 
-2026-10-25 Agent Skill 扩展：官方 `lan-asr` 来源为 `skills/lan-asr/`。
-`GET /skill` 公开返回同源 Markdown 指南并注入部署地址，`GET /skill/lan-asr.zip`
+2026-10-25 Agent Skill 扩展：官方 `hcds-lan-asr` 来源为 `skills/hcds-lan-asr/`。
+`GET /skill` 公开返回同源 Markdown 指南并注入部署地址，`GET /skill/hcds-lan-asr.zip`
 公开下载指南、客户端及自动生成的 `server.json`，`GET /skill/asr_batch.py` 返回客户端源文件。
 随包地址优先取 `ASR_PUBLIC_BASE_URL`；空值、loopback 或通配监听地址则取实际下载 URL。
 不将个人 IP 写入仓库模板，不分发凭据；客户端可用命令行或环境变量覆盖随包地址。
@@ -751,7 +751,7 @@ stdio MCP tools：
 
 ## 8. 运行与部署
 
-部署脚本默认在当前 WSL checkout 原地安装；推荐位置为 `~/services/asr-server`，保持 Linux 原生文件系统。历史 `/home/fragt/services/asr-server` 不是产品固定路径。
+部署脚本默认在当前 WSL checkout 原地安装；推荐位置为 `~/services/hcds-asr-server`，保持 Linux 原生文件系统。历史 `/home/fragt/services/asr-server` 不是产品固定路径。
 
 使用 Python 3.12、uv、FastAPI 和 Uvicorn。首次部署运行 `bash deploy/wsl-deploy.sh`，完成 CUDA 和 Qwen 独立 smoke 后安装 systemd user service。实际常驻使用部署目录 `.venv/bin/uvicorn`，避免启动时重新同步依赖。
 

@@ -11,7 +11,7 @@
 工作目录：
 
 ```bash
-~/services/asr-server
+~/services/hcds-asr-server
 ```
 
 目标入口：
@@ -46,7 +46,7 @@ docs/validation-2026-07-15-wsl-moss-long-form.md
 - 使用 uv 管理环境。
 - 使用 FastAPI + Uvicorn 实现 HTTP API。
 - 服务监听 `0.0.0.0:18080`。
-- 不要把项目放在 `/mnt/c` 下，放在 WSL 原生文件系统 `~/services/asr-server`。
+- 不要把项目放在 `/mnt/c` 下，放在 WSL 原生文件系统 `~/services/hcds-asr-server`。
 - 第一版优先做稳定的离线转写，不要一开始就实现 Web UI。
 - 模型包很重，安装前先检查磁盘空间、CUDA、`nvidia-smi`。
 - RTX 5070 Ti 较新，必须显式安装并验证 CUDA 版 torch，防止误装 CPU 版 torch。
@@ -67,7 +67,7 @@ MiMo-V2.5-ASR 不进入当前交付范围；不要把 MiMo 写进 `/v1/models`�
 先验收 torch CUDA，再安装 Qwen/MOSS 运行时依赖。`nvidia-smi` 只能证明 WSL 能看到驱动和显卡，不能证明 Python 环境里的 torch 是 CUDA 版。不要直接裸跑 `pip install torch`，必须使用 PyTorch 官方 CUDA wheel 源，例如 CUDA 12.8 的 `cu128`：
 
 ```bash
-cd ~/services/asr-server
+cd ~/services/hcds-asr-server
 
 uv python install 3.12
 uv sync
@@ -206,7 +206,7 @@ README.md
 开发顺序：
 
 1. 阅读现有 Mac 侧实现和测试，保留 API 合约、错误信封、生命周期语义。
-2. 在 WSL Arch Linux 的 `~/services/asr-server` 部署项目，不要放在 `/mnt/c`。
+2. 在 WSL Arch Linux 的 `~/services/hcds-asr-server` 部署项目，不要放在 `/mnt/c`。
 3. 检查磁盘空间、CUDA、`nvidia-smi`、Python 3.12、uv。
 4. 先用 `scripts/qwen_asr_backend_smoke.py` 跑通 HF native `transformers` 最小转录流程。
 5. 维护 Qwen3-ASR 适配器，真实跑通 `qwen3-asr-0.6b` 与 `qwen3-asr-1.7b`。

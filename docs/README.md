@@ -4,7 +4,7 @@
 
 ## 使用与维护
 
-- [官方 lan-asr Skill](../skills/lan-asr/SKILL.md)：部署后通过 `/skill` 读取同一份 Agent 用法，`/skill/lan-asr.zip` 下载完整指南及批量客户端；确切接口和运行时能力分别读取 `/openapi.json`、`/v1/models`。
+- [官方 hcds-lan-asr Skill](../skills/hcds-lan-asr/SKILL.md)：部署后通过 `/skill` 读取同一份 Agent 用法，`/skill/hcds-lan-asr.zip` 下载完整指南及批量客户端；确切接口和运行时能力分别读取 `/openapi.json`、`/v1/models`。
 - [局域网工作台与 Qwen 质量流程](product-workbench.md)：账号、断点上传、七天任务保留、长文搜索与跳转、回听改字及字幕导出。
 - [已接入模型的推理实践](asr-model-practices.md)：Qwen 官方 native helpers、音频规范化、生成预算、ForcedAligner 和 MOSS SDPA 的代码与官方来源对照。
 - [Qwen 质量评测](../evaluation/README.md)：开发/验收集、切分候选对照、CER/术语/字幕门槛。
@@ -21,6 +21,7 @@
 
 这些是对应版本和环境的历史证据，不代表所有硬件、发行版、模型或音频质量都已验证。
 
+- [2026-10-25 HCDS 改名](validation-2026-10-25-hcds-rename.md)：仓库与官方 Skill 名称、下载入口兼容及旧批次状态延续。
 - [2026-10-25 Skill 随包地址](validation-2026-10-25-skill-address.md)：部署地址自动注入、解压即用、地址覆盖顺序及生成配置不进入服务源包。
 - [2026-10-25 官方 Agent Skill](validation-2026-10-25-agent-skill.md)：本机 lan-asr 更新、官方同源分发、原始 HTML 发现入口、批量客户端迁移与 mock HTTP 流程。
 - [2026-10-25 工作台界面与长转录](validation-2026-10-25-workbench-ui.md)：HCDS 主题、GSAP、固定视口与虚拟列表；10,800 段构造样本、手机布局、完整导出和前端覆盖发布。

@@ -14,7 +14,7 @@ from typing import Annotated, Any, cast
 from fastapi import Body, FastAPI, File, Form, UploadFile, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_swagger_ui_html, get_swagger_ui_oauth2_redirect_html
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from asr_server import __version__
@@ -124,7 +124,7 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
             logging_runtime.close()
 
     app = GatewayApp(
-        title="WSL ASR Server",
+        title="HCDS ASR Server",
         version=__version__,
         description=docs_description(),
         docs_url=None,
@@ -172,7 +172,7 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         schema_url = escape(f"{root_path}{app.openapi_url}", quote=True)
         navigation = (
             '<nav aria-label="Agent documentation" style="padding:16px 24px;font:16px sans-serif">'
-            f'<a href="{skill_url}">Official LAN ASR Agent Skill (Markdown)</a>'
+            f'<a href="{skill_url}">Official hcds-lan-asr Agent Skill (Markdown)</a>'
             f' · <a href="{schema_url}">OpenAPI JSON</a></nav>'
         )
         return HTMLResponse(bytes(swagger.body).decode("utf-8").replace("<body>", f"<body>{navigation}", 1))
@@ -185,7 +185,7 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
     async def official_agent_skill(request: Request) -> MarkdownResponse:
         """Read the official Agent workflow before using this ASR Server.
 
-        Download /skill/lan-asr.zip for the guide and batch client together.
+        Download /skill/hcds-lan-asr.zip for the guide and batch client together.
         Discover current model capabilities separately through GET /v1/models.
         """
         base_url = skill_base_url(app_settings.public_base_url, str(request.base_url))
@@ -199,8 +199,14 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
             headers={"Content-Disposition": 'attachment; filename="asr_batch.py"'},
         )
 
+    @app.get("/skill/lan-asr.zip", response_class=RedirectResponse, include_in_schema=False)
+    async def legacy_skill_download(request: Request) -> RedirectResponse:
+        """Keep existing download links usable after the Skill rename."""
+        root_path = request.scope.get("root_path", "").rstrip("/")
+        return RedirectResponse(f"{root_path}/skill/hcds-lan-asr.zip", status_code=307)
+
     @app.get(
-        "/skill/lan-asr.zip", response_class=Response, tags=["documentation"],
+        "/skill/hcds-lan-asr.zip", response_class=Response, tags=["documentation"],
         responses={200: {"content": {"application/zip": {}}}},
     )
     async def official_skill_download(request: Request) -> Response:
@@ -208,7 +214,7 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         base_url = skill_base_url(app_settings.public_base_url, str(request.base_url))
         return Response(
             skill_archive(base_url), media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="lan-asr.zip"', "Cache-Control": "no-store"},
+            headers={"Content-Disposition": 'attachment; filename="hcds-lan-asr.zip"', "Cache-Control": "no-store"},
         )
 
     @app.get("/docs/mcp", response_class=PlainTextResponse, tags=["documentation"])

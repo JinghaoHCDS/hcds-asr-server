@@ -1,7 +1,7 @@
 # 请求端 Agent 提示词
 
 先请求目标服务的 `GET /skill` 阅读与其版本一致的官方 Agent 用法，再读取
-`GET /openapi.json` 和 `GET /v1/models`。`/skill/lan-asr.zip` 提供指南及配套批量客户端。
+`GET /openapi.json` 和 `GET /v1/models`。`/skill/hcds-lan-asr.zip` 提供指南及配套批量客户端。
 旧服务返回 `/skill` 404 时，可按现有 OpenAPI 接入并说明版本差异；网络或鉴权失败不视为旧版本。
 
 > 2026-10-25 平台扩展遵循 [平台运行契约](../docs/asr-platform-runtime.md)：所有 HTTP 推理共享 FIFO，短同步也会排队；工作台可显式选择支持的模型/profile，并提供摘要分页、revision/ETag；日志可按 job/trace 关联。历史内存-only限制只适用于旧 `/v1` owner。

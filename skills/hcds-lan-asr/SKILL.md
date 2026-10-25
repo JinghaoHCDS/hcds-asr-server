@@ -1,18 +1,18 @@
 ---
-name: lan-asr
-description: "Use an existing LAN ASR Server to transcribe local audio or video, obtain real alignment or anonymous speaker segments, and run resumable client-side batches through its HTTP API."
+name: hcds-lan-asr
+description: "Use an existing HCDS ASR Server to transcribe local audio or video, obtain real alignment or anonymous speaker segments, and run resumable client-side batches through its HTTP API."
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
   validated-client: "macOS with Python 3.12+; other client platforms require validation"
   hermes:
     tags: [asr, transcription, batch, local-network]
 ---
 
-# LAN ASR Server — Official Agent Skill
+# HCDS ASR Server — Official Agent Skill
 
 <!-- deployment-address -->
 
-Use this skill to call an existing LAN ASR Server. Inference runs on the server; the client needs no GPU packages or model downloads. This guide belongs to the server version that serves it. Runtime availability and capabilities always come from `GET /v1/models`.
+Use this skill to call an existing HCDS ASR Server. Inference runs on the server; the client needs no GPU packages or model downloads. This guide belongs to the server version that serves it. Runtime availability and capabilities always come from `GET /v1/models`.
 
 ## Find the server and its instructions
 
@@ -23,7 +23,7 @@ For a freshly downloaded package, no IP configuration is needed. Its address com
 Relative HTTP links in this guide use that server as their origin:
 
 - `/skill`: this official Markdown guide.
-- `/skill/lan-asr.zip`: installable folder containing this guide and `scripts/asr_batch.py`.
+- `/skill/hcds-lan-asr.zip`: installable folder containing this guide and `scripts/asr_batch.py`.
 - `/skill/asr_batch.py`: the same dependency-free Python batch client as plain source.
 - `/openapi.json`: request parameters, response schemas and error envelopes.
 - `/docs`: interactive API documentation; `/docs/mcp`: client-side stdio MCP setup.
@@ -78,12 +78,14 @@ When authentication is enabled, add `-H "Authorization: Bearer $ASR_TOKEN"` to e
 
 ## Use the bundled batch client
 
-Requires Python 3.12+ and its standard library. Run the `scripts/asr_batch.py` shipped alongside this SKILL.md from its actual install directory. For the existing shared installation, it is `~/.Agent/skills/lan-asr/scripts/asr_batch.py`; a repository checkout uses `skills/lan-asr/scripts/asr_batch.py`. No profile-specific installation is required.
+The Skill is named `hcds-lan-asr`. For upgrade compatibility, local state and submission idempotency retain the legacy `lan-asr` namespace; changing the Skill folder does not move or reset existing batches.
+
+Requires Python 3.12+ and its standard library. Run the `scripts/asr_batch.py` shipped alongside this SKILL.md from its actual install directory. For the existing shared installation, it is `~/.Agent/skills/hcds-lan-asr/scripts/asr_batch.py`; a repository checkout uses `skills/hcds-lan-asr/scripts/asr_batch.py`. No profile-specific installation is required.
 
 Confirm the source and output directories when the user has not supplied them. The default output is `<source>/asr-transcripts`. Pass a directory, optionally restricted with repeatable `--include` patterns:
 
 ```bash
-python3 /path/to/lan-asr/scripts/asr_batch.py run /absolute/path/to/media \
+python3 /path/to/hcds-lan-asr/scripts/asr_batch.py run /absolute/path/to/media \
   --output-dir /absolute/path/to/transcripts \
   --purpose transcription --language auto --quality-profile legacy
 ```
@@ -93,9 +95,9 @@ The client discovers a compatible default model when `--model` is omitted; use `
 `run` prints a batch ID. The local SQLite database defaults to `~/.Agent/state/lan-asr/batches.sqlite`; `--db` selects another local database. Existing batches remain readable. Request options, including the selected server, are frozen per batch and reused by `resume`; a later config change does not redirect an existing batch. Older batches have no original SHA256, so initial recovery can only compare their saved size/mtime before establishing a digest:
 
 ```bash
-python3 /path/to/lan-asr/scripts/asr_batch.py status --batch BATCH_ID
-python3 /path/to/lan-asr/scripts/asr_batch.py resume BATCH_ID
-python3 /path/to/lan-asr/scripts/asr_batch.py cancel BATCH_ID
+python3 /path/to/hcds-lan-asr/scripts/asr_batch.py status --batch BATCH_ID
+python3 /path/to/hcds-lan-asr/scripts/asr_batch.py resume BATCH_ID
+python3 /path/to/hcds-lan-asr/scripts/asr_batch.py cancel BATCH_ID
 ```
 
 Outputs are `<original-filename>.txt` and `<original-filename>.asr.json` under the output directory, preserving subdirectories. This local batch state is separate from server job persistence. A lost `/v1` job may be resubmitted once with unchanged source and frozen options; recovery does not reuse server checkpoints. Report the batch ID, model, purpose/profile, completed/failed counts, output directory and unresolved errors.

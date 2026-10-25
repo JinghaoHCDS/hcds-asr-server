@@ -49,7 +49,7 @@ async def _call(operation: Awaitable[dict[str, Any]]) -> dict[str, Any]:
 
 def create_mcp_server(client: AsrHttpClient) -> FastMCP:
     mcp = FastMCP(
-        "LAN ASR Gateway",
+        "HCDS ASR Server",
         instructions=(
             "Discover model capabilities before transcribing. Use asynchronous jobs for long audio. "
             "Local file paths must be inside ASR_MCP_ALLOWED_ROOTS."
