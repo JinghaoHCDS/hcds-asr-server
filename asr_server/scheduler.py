@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from time import perf_counter
@@ -43,6 +44,35 @@ class OperationScheduler:
         self.closed = False
         self.prefetch = prefetch
         self._preparation_slot = asyncio.Semaphore(1)
+        self.refill: Callable[[], Awaitable[None]] | None = None
+        self._admission_lock = asyncio.Lock()
+        self._admitting_task: asyncio.Task[Any] | None = None
+
+    @asynccontextmanager
+    async def admission(self) -> AsyncIterator[None]:
+        # Refill calls submit on this same task. Other submitters must wait
+        # until older durable requests have taken the released slots.
+        task = asyncio.current_task()
+        if self._admitting_task is task:
+            yield
+            return
+        async with self._admission_lock:
+            self._admitting_task = task
+            try:
+                if not self.closed and self.refill is not None and len(self.operations) < self.capacity:
+                    await self.refill()
+                yield
+            finally:
+                self._admitting_task = None
+
+    async def refill_available(self) -> None:
+        try:
+            async with self.admission():
+                pass
+        except Exception as exc:
+            # Preserve the worker; maintenance may recover transient store
+            # failures. New admissions retry refill before taking a slot.
+            emit("scheduler.refill_failed", diagnostics=safe_exception(exc))
 
     async def start(self) -> None:
         if self.worker is None or self.worker.done():
@@ -54,6 +84,13 @@ class OperationScheduler:
                      prepare: Callable[[], Awaitable[None]] | None = None,
                      dispose: Callable[[], Awaitable[None]] | None = None) -> ScheduledOperation:
         await self.start()
+        async with self.admission():
+            return await self._submit(key, run, kind=kind, context=context, prepare=prepare, dispose=dispose)
+
+    async def _submit(self, key: str, run: Callable[[], Awaitable[Any]], *, kind: str,
+                      context: ExecutionContext | None,
+                      prepare: Callable[[], Awaitable[None]] | None,
+                      dispose: Callable[[], Awaitable[None]] | None) -> ScheduledOperation:
         async with self.condition:
             if self.closed:
                 raise AsrError(503, "server_stopping", "inference scheduler is stopping")
@@ -112,6 +149,7 @@ class OperationScheduler:
             operation.preparation.cancel()
             await asyncio.gather(operation.preparation, return_exceptions=True)
         await self._dispose(operation)
+        await self.refill_available()
         return True
 
     async def _dispose(self, operation: ScheduledOperation) -> None:
@@ -219,3 +257,4 @@ class OperationScheduler:
                     self.operations.pop(key, None)
                     self.running = None
                     _owns_operation.reset(token)
+                    await self.refill_available()

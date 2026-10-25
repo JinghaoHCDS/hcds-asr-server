@@ -7,6 +7,7 @@ import tempfile
 import threading
 import wave
 import weakref
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -197,7 +198,8 @@ class MediaPreprocessor:
 
     async def normalize(self, input_path: Path, output_path: Path, *, timeout_seconds: float = 1800.0,
                         cancel_event: threading.Event | None = None,
-                        owner: str = "workspace", resource_lease: ResourceLease | None = None) -> NormalizedAudioPath:
+                        owner: str = "workspace", resource_lease: ResourceLease | None = None,
+                        ensure_output_capacity: Callable[[int], Awaitable[None]] | None = None) -> NormalizedAudioPath:
         started = perf_counter()
         queue_started = perf_counter()
         try:
@@ -206,7 +208,8 @@ class MediaPreprocessor:
                 # _normalize does not return/raise until decoder reaping and
                 # partial-file cleanup complete, including cancellation.
                 result = await self._normalize(input_path, output_path, timeout_seconds=timeout_seconds,
-                                               cancel_event=cancel_event, owner=owner, resource_lease=resource_lease)
+                                               cancel_event=cancel_event, owner=owner, resource_lease=resource_lease,
+                                               ensure_output_capacity=ensure_output_capacity)
         except BaseException as error:
             emit("media.normalization_failed", duration_ms=(perf_counter() - started) * 1000,
                  budget_bytes=self.max_output_bytes,
@@ -224,7 +227,8 @@ class MediaPreprocessor:
 
     async def _normalize(self, input_path: Path, output_path: Path, *, timeout_seconds: float = 1800.0,
                          cancel_event: threading.Event | None = None,
-                         owner: str = "workspace", resource_lease: ResourceLease | None = None) -> NormalizedAudioPath:
+                         owner: str = "workspace", resource_lease: ResourceLease | None = None,
+                         ensure_output_capacity: Callable[[int], Awaitable[None]] | None = None) -> NormalizedAudioPath:
         _positive_finite(timeout_seconds, "timeout_seconds")
         if cancel_event is not None and cancel_event.is_set():
             raise asyncio.CancelledError
@@ -253,6 +257,8 @@ class MediaPreprocessor:
                 target.setframerate(self.spec.sample_rate)
                 # Emit the empty header before the first output block. Every
                 # later write, including final header patching, stays in budget.
+                if ensure_output_capacity is not None:
+                    await ensure_output_capacity(WAV_HEADER_BYTES)
                 target.writeframesraw(b"")
                 if resource_lease is not None:
                     await resource_lease.materialize(WAV_HEADER_BYTES)
@@ -265,6 +271,8 @@ class MediaPreprocessor:
                     if total + WAV_HEADER_BYTES > self.max_output_bytes:
                         raise AsrError(503, "storage_unavailable", "decoded audio exceeds its output byte budget",
                                        {"max_output_bytes": self.max_output_bytes})
+                    if ensure_output_capacity is not None:
+                        await ensure_output_capacity(total + WAV_HEADER_BYTES)
                     data = pending + block
                     aligned_bytes = len(data) - len(data) % self.spec.frame_bytes
                     pcm, pending = data[:aligned_bytes], data[aligned_bytes:]
@@ -365,8 +373,9 @@ async def normalize_audio_path_to_wav_async(input_path: Path, output_path: Path,
                                            spec: AudioSpec = DEFAULT_AUDIO_SPEC,
                                            cancel_event: threading.Event | None = None,
                                            owner: str = "workspace",
-                                           resource_lease: ResourceLease | None = None) -> NormalizedAudioPath:
+                                           resource_lease: ResourceLease | None = None,
+                                           ensure_output_capacity: Callable[[int], Awaitable[None]] | None = None) -> NormalizedAudioPath:
     return await MediaPreprocessor(spec=spec, max_output_bytes=max_output_bytes,
                                    max_duration_seconds=max_duration_seconds).normalize(
         input_path, output_path, timeout_seconds=timeout_seconds, cancel_event=cancel_event, owner=owner,
-        resource_lease=resource_lease)
+        resource_lease=resource_lease, ensure_output_capacity=ensure_output_capacity)

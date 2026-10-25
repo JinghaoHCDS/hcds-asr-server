@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import math
 import shutil
 import sqlite3
 import threading
@@ -59,6 +60,7 @@ class WorkbenchService:
         self.progress_saved: dict[str, float] = {}
         self.reconciling = False
         self.preparation_errors: dict[str, BaseException] = {}
+        self.prepared_assets: dict[str, NormalizedAudioAsset] = {}
 
     async def transaction(self, operation: Callable[[sqlite3.Connection], T]) -> T:
         def execute() -> T:
@@ -146,10 +148,13 @@ class WorkbenchService:
                 except AsrError as exc:
                     if exc.code != "job_queue_full":
                         raise
+        self.app.state.job_manager.scheduler.refill = self.fill_queue
+        await self.app.state.job_manager.scheduler.refill_available()
         self.maintenance = asyncio.create_task(self.maintenance_loop())
 
     async def shutdown(self) -> None:
         self.stopping = True
+        self.app.state.job_manager.scheduler.refill = None
         for context in self.contexts.values():
             context.cancel_event.set()
         if self.maintenance is not None:
@@ -175,9 +180,18 @@ class WorkbenchService:
             await self.fill_queue()
 
     async def fill_queue(self) -> None:
+        if self.stopping:
+            return
         for job_id in await self.store.run(self.store.pending_jobs):
-            job = await self.store.run(self.store.job, job_id)
+            try:
+                job = await self.store.run(self.store.job, job_id)
+            except AsrError as exc:
+                if exc.code == "job_not_found":
+                    continue
+                raise
             if job["id"] in self.active:
+                continue
+            if job.get("delete_requested") or job.get("cancel_requested"):
                 continue
             pending_alignment = (job.get("result") or {}).get("alignment_status") == "pending"
             if job["status"] == "queued" or pending_alignment:
@@ -496,7 +510,7 @@ class WorkbenchService:
         if added:
             self.active.add(job_id)
         try:
-            await self.prepare_audio(job_id)
+            self.prepared_assets[job_id] = await self.prepare_audio(job_id)
         except AsrError as exc:
             # A speculative successor cannot take resources needed by the
             # running owner. Retry admission when this operation gets its turn.
@@ -516,6 +530,7 @@ class WorkbenchService:
     async def dispose_preparation(self, job_id: str) -> None:
         """May run while cancel/delete owns service.lock; never acquire it here."""
         self.preparation_errors.pop(job_id, None)
+        self.prepared_assets.pop(job_id, None)
         await self.store.run((self.job_dir(job_id) / "audio.partial.wav").unlink, missing_ok=True)
         def release_unused() -> None:
             try:
@@ -585,18 +600,27 @@ class WorkbenchService:
         if not audio.exists():
             context = self.context_for(job)
             duration = await probe_audio_duration_path_async(source, timeout_seconds=self.settings.ffprobe_timeout_seconds, cancel_event=context.cancel_event)
-            if duration is not None and duration > 21600:
-                raise AsrError(422, "duration_limit_exceeded", "workbench accepts at most six hours of audio")
-            pcm_budget = int((duration if duration is not None else 21600) * definition.audio_spec.bytes_per_second) + 4096
-            margin = self.processing_margin(request, duration if duration is not None else 21600)
-            # One complete normalized asset plus one bounded worker slice.
+            # Container duration is an estimate (notably for VBR MP3). Actual
+            # decoded frames enforce the six-hour limit, never ffprobe alone.
+            pcm_limit = 21600 * definition.audio_spec.bytes_per_second + 44
+            pcm_budget = min(pcm_limit, int(min(duration or 60, 21600) * definition.audio_spec.bytes_per_second) + 44)
+            margin = self.processing_margin(request, 21600)
+            # Initial PCM estimate plus one bounded worker slice; grow before
+            # writing additional decoded bytes, under the same quota checks.
             await self.reserve_processing(job, pcm_budget + margin)
             temp_audio = root / "audio.partial.wav"
             lease = await self.app.state.workspace_manager.handoff_persistent(root, "job:" + job_id, pcm_budget)
+            async def ensure_output_capacity(required: int) -> None:
+                if required <= lease.size_bytes:
+                    return
+                desired = min(pcm_limit, max(required, lease.size_bytes + 1024 * 1024))
+                await self.reserve_processing(job, desired + margin)
+                await lease.grow_persistent(desired - lease.size_bytes)
             try:
                 normalized = await normalize_audio_path_to_wav_async(source, temp_audio, timeout_seconds=self.settings.ffmpeg_timeout_seconds,
-                    max_output_bytes=pcm_budget, max_duration_seconds=21600, spec=definition.audio_spec,
-                    cancel_event=context.cancel_event, owner=job_id, resource_lease=lease)
+                    max_output_bytes=pcm_limit, max_duration_seconds=21600, spec=definition.audio_spec,
+                    cancel_event=context.cancel_event, owner=job_id, resource_lease=lease,
+                    ensure_output_capacity=ensure_output_capacity)
                 await lease.release_unused()
                 asset = normalized.asset
                 if asset is None:
@@ -638,12 +662,12 @@ class WorkbenchService:
                 if exc.code == "job_not_found":
                     return
                 raise
-            if starting.get("delete_requested") or starting.get("cancel_requested") or starting["status"] == "cancel_requested":
-                return
             self.active.add(job_id)
         root = self.job_dir(job_id)
         workspace = root / "work"
         try:
+            if starting.get("delete_requested") or starting.get("cancel_requested") or starting["status"] == "cancel_requested":
+                raise WorkbenchInterrupted()
             async with self.lock:
                 self.check_running(job_id)
                 job = await self.store.run(self.store.job_metadata, job_id)
@@ -658,7 +682,9 @@ class WorkbenchService:
             prepared_error = self.preparation_errors.pop(job_id, None)
             if prepared_error is not None:
                 raise prepared_error
-            asset = await self.prepare_audio(job_id)
+            asset = self.prepared_assets.pop(job_id, None)
+            if asset is None:
+                asset = await self.prepare_audio(job_id)
             self.check_running(job_id)
             workspace.mkdir(exist_ok=True)
             async def stage(phase: str, progress: dict[str, object]) -> None:
@@ -690,7 +716,7 @@ class WorkbenchService:
                 normalized_asset=asset, cancel_event=self.context_for(job).cancel_event,
             )
             self.check_running(job_id)
-            self.prepare_result(result)
+            self.prepare_result(result, segment_timestamps=definition.capabilities.segment_timestamps)
             await asyncio.to_thread(shutil.rmtree, workspace, True)
             async with self.lock:
                 self.check_running(job_id)
@@ -753,6 +779,8 @@ class WorkbenchService:
                 if finish_cancel:
                     await self.finish_cancel(current)
         finally:
+            self.prepared_assets.pop(job_id, None)
+            self.preparation_errors.pop(job_id, None)
             await asyncio.to_thread(shutil.rmtree, workspace, True)
             self.active.discard(job_id)
             try:
@@ -769,7 +797,8 @@ class WorkbenchService:
             self.progress.pop(job_id, None)
             self.progress_saved.pop(job_id, None)
 
-    def prepare_result(self, result: dict[str, Any]) -> None:
+    def prepare_result(self, result: dict[str, Any], *, segment_timestamps: bool = False) -> None:
+        model_segments = bool(result.get("segments")) and segment_timestamps
         segments = result.get("segments") or result.get("chunks") or []
         for index, segment in enumerate(segments):
             segment["id"] = str(segment.get("id", f"segment-{index}"))
@@ -781,6 +810,9 @@ class WorkbenchService:
         result["version"] = 1
         incomplete = any(segment.get("reading_segmentation") == "unmapped_alignment" for segment in segments)
         result["alignment_status"] = "incomplete" if incomplete else "aligned" if result.get("timestamps") else "unavailable"
+        if result["alignment_status"] == "unavailable" and model_segments and valid_segment_timing(result):
+            result["alignment_status"] = "segment_timed"
+            result["timestamp_source"] = "model_segments"
         result["changes"] = result.get("quality", {}).get("changes", [])
         result["versions"] = [{"version": 1, "created_at": now(), "alignment_status": result["alignment_status"]}]
 
@@ -799,7 +831,11 @@ class WorkbenchService:
             self.terminal(current, "cancelled")
             current["cancel_requested"] = True
             current["progress"]["phase"] = "cancelled"
-            (await self.store.run(self.store.save_job, current))
+            self.prepared_assets.pop(job["id"], None)
+            await self.store.run(self.record_files_sync, job["id"], ["source", "audio.wav"])
+            current["retained_file_bytes"] = (await self.store.run(self.store.job_metadata, job["id"]))["retained_file_bytes"]
+            await self.store.run(self.store.save_job, current, reserved_bytes=sum(current["retained_file_bytes"].values()))
+            await self.sync_disk_reservations()
             emit("job.cancelled")
 
     async def cancel(self, owner: str, job_id: str) -> dict[str, Any]:
@@ -848,6 +884,7 @@ class WorkbenchService:
         self.progress.pop(job["id"], None)
         self.progress_saved.pop(job["id"], None)
         self.preparation_errors.pop(job["id"], None)
+        self.prepared_assets.pop(job["id"], None)
 
     async def retry(self, owner: str, job_id: str) -> dict[str, Any]:
         async with self.lock:
@@ -1070,22 +1107,50 @@ def timestamp(seconds: float, *, vtt: bool = False) -> str:
     return f"{hour:02d}:{minute:02d}:{second:02d}{'.' if vtt else ','}{ms:03d}"
 
 
-def export_result(result: dict[str, Any], format_: str) -> tuple[str, str]:
+def valid_segment_timing(result: dict[str, Any]) -> bool:
+    segments = [s for s in result.get("segments", []) if s.get("text", "").strip()]
+    if not segments:
+        return False
+    try:
+        duration = float(result["duration"])
+        if not math.isfinite(duration) or duration <= 0:
+            return False
+        previous_start = -1.0
+        for segment in segments:
+            if segment.get("timestamp_source") not in {None, "model_segments"}:
+                return False  # historical fallback chunks carry vad_chunk_window
+            start, end = float(segment["start"]), float(segment["end"])
+            if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration and start >= previous_start):
+                return False
+            previous_start = start
+        # A parser dropping some text must not silently produce partial subtitles.
+        return "".join("".join(s["text"].split()) for s in segments) == "".join(result["text"].split())
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def export_result(result: dict[str, Any], format_: str, *, segment_timestamps: bool = False) -> tuple[str, str]:
     if format_ == "txt":
         return result["text"] + "\n", "text/plain"
     if format_ == "json":
         return json.dumps(result, ensure_ascii=False, indent=2) + "\n", "application/json"
     if format_ not in {"srt", "vtt"}:
         raise AsrError(400, "bad_request", "unsupported export format")
-    if result.get("alignment_status") != "aligned":
+    model_timing = (segment_timestamps and result.get("alignment_status") in {"unavailable", "segment_timed"}
+                    and valid_segment_timing(result))
+    if result.get("alignment_status") != "aligned" and not model_timing:
         raise AsrError(409, "alignment_pending", "subtitles are unavailable until this transcript version is aligned")
     cues: list[str] = []
     for segment in result["segments"]:
         if not segment["text"].strip():
             continue
         items = segment.get("timestamps", [])
-        if not items:
+        if model_timing:
+            start, end = segment["start"], segment["end"]
+        elif not items:
             raise AsrError(409, "alignment_incomplete", "a transcript segment has no real alignment")
-        cues.append(f"{len(cues) + 1}\n{timestamp(items[0]['start'], vtt=format_ == 'vtt')} --> {timestamp(items[-1]['end'], vtt=format_ == 'vtt')}\n{segment['text']}")
+        else:
+            start, end = items[0]["start"], items[-1]["end"]
+        cues.append(f"{len(cues) + 1}\n{timestamp(start, vtt=format_ == 'vtt')} --> {timestamp(end, vtt=format_ == 'vtt')}\n{segment['text']}")
     text = ("WEBVTT\n\n" if format_ == "vtt" else "") + "\n\n".join(cues) + "\n"
     return text, "text/vtt" if format_ == "vtt" else "application/x-subrip"

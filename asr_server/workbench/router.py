@@ -214,7 +214,8 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
         if not task.get("result"):
             raise AsrError(409, "result_not_ready", "task has no complete transcript")
         result = await service.store.run(service.store.version, job_id, version) if version is not None else task["result"]
-        text, media_type = await service.store.run(export_result, result, format)
+        text, media_type = await service.store.run(export_result, result, format,
+            segment_timestamps=definition.capabilities.segment_timestamps)
         filename = quote(f"{task['filename']}.v{result['version']}.{format}")
         return Response(text, media_type=media_type, headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",

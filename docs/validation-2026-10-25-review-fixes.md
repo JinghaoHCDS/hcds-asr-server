@@ -1,0 +1,68 @@
+# 2026-10-25 审查修复线上部署与实测
+
+本轮修复已部署到既有 WSL 服务，局域网入口仍为 `18080`。线上行为回归 **17/17**、三模型矩阵 **46/46** 通过，另完成独立 CUDA / MOSS SDPA 实测。原有 1 个用户、7 个任务、7 个上传记录和 7 个结果版本保持一致；测试账号、任务及其文件已清理。
+
+## 发布与恢复证据
+
+- 用户明确授权本轮部署与实测。部署前确认无活动任务，先备份代码、数据库、保留媒体和既有配置，再停止服务替换代码并启动。
+- 发布基于 `0270bba39158d652fafbc69255e905dd8387fe08` 加本轮未提交修复；commit 单独不能标识本次版本。
+- 源码 `source_digest`：`b3612e6316d180eec76626f681ae3c3d180afb632b294ebd3670a4f0cc8e1fe1`。
+- 发布包 SHA256：`cca5e63bebf245b6d00f1c5c850a968b14d4f515668ec37546143c018ab43f65`，线上 **214/214** 文件匹配清单。
+- 备份：`/home/fragt/services/backups/review-fixes-20261025-retry`；发布包与原始验收数据：`/home/fragt/services/releases/review-fixes-20261025`。
+- 首次切换因数据库比较包含启动维护会递增的 `jobs.revision` 而触发自动回滚。核对发现仅此字段变化；随后比较全部其他字段并保留媒体哈希检查，重试成功。未恢复旧数据库覆盖新数据。
+- 成功发布后服务 PID `10543`，全部实测期间没有重启。服务单元、`.env`、依赖 pins 和模型 revisions 未修改。
+- 本报告和配套验收 JSON 在实测后生成，不属于上面已封存发布包的 214 个文件。
+
+## 环境与测试材料
+
+RTX 5070 Ti 16 GB / WSL Arch Linux，torch `2.11.0+cu128`、CUDA `12.8`、capability `12.0`，transformers `5.18.0.dev0`。使用已有依赖和模型缓存，没有安装新的模型运行时。
+
+有参考文本的英文材料来自 [HF LibriSpeech 测试集](https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy)，固定 revision `5be91486e11a2d616f4ec5db8d3fd248585ac07a`：
+
+- 5 条真实英文朗读短句，共 48 个参考词、19.63 秒，同一说话人。
+- 19 条同一说话人的原始片段加 0.5 秒间隔拼接为 **192.94 秒**，共 435 个参考词。它用于跨切块流程测试，不代表自然长对话。
+- 另自拟中文文本，由 macOS Tingting 合成 **15.26 秒、62 个汉字**；增加 48 kHz 双声道变体，检查归一化路径。
+- 仓库短音频用于产品流程回归；无人工参考文本，不计算其准确率。
+- 构造数字静音、损坏文件、低生成预算、probe 严重低估时长的变码率纯音 MP3，以及准备阶段取消/删除用长音频。
+
+样本 ID、来源和 SHA256 见 [samples.json](validation-artifacts/2026-10-25-review-fixes/samples.json)。没有把用户原音或完整用户转录放入验收文档。
+
+## 实测结果
+
+| 模型与路径 | 英文短句 WER | 合成中文 CER | 192.94 秒英文 WER | 长样本端到端耗时 |
+| --- | ---: | ---: | ---: | ---: |
+| Qwen 0.6B / legacy | 2/48 = 4.17% | 0/62 = 0% | 本轮未测 | — |
+| Qwen 1.7B / quality_v1 | 2/48 = 4.17% | 0/62 = 0% | 14/435 = 3.22% | 14.03 秒 |
+| MOSS 0.9B / legacy | 0/48 = 0% | 0/62 = 0% | 13/435 = 2.99% | 23.33 秒 |
+
+WER/CER 使用大小写及 NFKC 归一化、去标点后的 Levenshtein 距离；英文按词、中文按字符。不同 profile 不构成严格模型排名。短句样本很小，中文为合成语音，不能将表中数值当作真实会议准确率。
+
+长样本计时从上传开始到轮询完成，包含归一化、任务调度和 Qwen 对齐，排除之后的导出与删除。两者均为已加载模型的一次测量，RTF 分别约 0.073 和 0.121，不是冷启动吞吐基准。Qwen 返回 433 个对齐时间戳；MOSS 返回 31 段，模型覆盖检查没有发现未覆盖语音区间。覆盖检查通过不等于每个词正确。
+
+功能回归覆盖：
+
+- 普通账号权限、匿名拒绝、任务归属隔离；上传 offset 重放与冲突。
+- 排队取消、**实际观察到 partial 文件后的准备阶段取消/删除**、终态文件清理。
+- Qwen 和 MOSS 真实转录，TXT/JSON/SRT/VTT 导出；MOSS 标记 `segment_timed`。
+- 编辑后真实重新对齐、过期版本返回 409，ETag 304、音频 Range 206。
+- 变码率 MP3 probe 约 16 秒，完整解码 **70.034 秒**；该样本是纯音，之后返回受控 `empty_transcription`，未误记为解码失败或语音识别成功。
+- 三模型依次切换后只保留一个已加载 ASR runtime；最终 API 卸载全部模型。
+- 数字静音输出空文本；损坏音频返回 `audio_decode_failed`；Qwen 和 MOSS 显式 `max_new_tokens=1` 返回 HTTP 422 `generation_truncated`，未把截断稿作为完成结果。
+
+所有模型矩阵转录都使用独立测试账号；46 个检查的通过判据是接口、生命周期和完整结果行为。表中识别错误率另行报告，不用“功能通过”代替准确率门槛。
+
+## SDPA 与资源回收
+
+独立探针完成真实 CUDA tensor 运算，加载生产 adapter，确认 MOSS 主配置及 `Qwen3Attention`、`WhisperAttention` 的 `_attn_implementation` 均为 `sdpa`，再执行中文音频转录并卸载。与[推理实践及官方来源](asr-model-practices.md)对应。
+
+MOSS 长样本报告 worker 的 torch allocated 峰值 **2155.91 MiB**。本轮全卡采样未取得数据，原因是非交互 SSH 的 PATH 不含 `nvidia-smi`；不提供全卡峰值结论。最后使用 `/usr/lib/wsl/lib/nvidia-smi` 成功检查，未发现 CUDA compute PID，全卡占用为 1740 MiB，包含 Windows 桌面等占用，不能全部归为 ASR。
+
+最终服务 active、三个模型 unloaded、active_requests 均为 0。所有原任务除维护 revision 外的数据库字段与备份一致，原保留文件哈希一致；没有多余任务目录或上传文件，配额计数非负且无孤立配额记录。LAN `/health` 和工作台首页均 HTTP 200。
+
+## 验证范围与证据
+
+本地完整回归 **393 passed / 4 skipped**，mypy **116 文件**、发布依赖检查与前端生产构建通过；WSL 部署前相关回归 **32 passed**。事件驱动 FIFO 回填及较早任务优先的竞争行为由本地回归覆盖，本轮没有额外制造线上队列饱和压力。
+
+完整脱敏结果见 [summary.json](validation-artifacts/2026-10-25-review-fixes/summary.json)。本机忽略目录 `data/deploy-review-fixes-20261025/` 保留实际使用的验收脚本、公开/合成样本和原始结果；线上备份可用于回退。没有提交或推送 Git。
+
+本轮未覆盖六小时真实录音、自然多人说话人准确率、术语专项、长时间并发压力或三轮配对性能比较；既有 MOSS 高语速音频可能需要显式更高生成预算的限制仍适用，参见[前序验收](validation-2026-10-25-wsl-platform.md)。

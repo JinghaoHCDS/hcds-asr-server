@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import wave
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +53,14 @@ class NormalizedAudioAsset:
     pcm_sha256: str
     normalization_version: str = NORMALIZATION_VERSION
     owner: str = "workspace"
+    _file_identity: tuple[int, int, int, int, int] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_file_identity", self._stat_identity())
+
+    def _stat_identity(self) -> tuple[int, int, int, int, int]:
+        stat = self.path.stat()
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
 
     @property
     def duration(self) -> float:
@@ -105,4 +113,11 @@ class NormalizedAudioAsset:
         return asset
 
     def validate(self, *, spec: AudioSpec | None = None) -> None:
+        # Objects originate from bounded decoding or a full recovery hash.
+        # Borrowing an unchanged, service-owned file need not scan hours of PCM.
+        try:
+            if (spec is None or spec == self.spec) and self._stat_identity() == self._file_identity:
+                return
+        except OSError:
+            pass
         self.from_metadata(self.path, self.to_metadata(), spec=spec or self.spec)

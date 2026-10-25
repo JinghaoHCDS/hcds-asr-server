@@ -76,11 +76,12 @@ async def test_moss_load_and_transcribe_use_official_helpers(monkeypatch: pytest
 
     class FakeModel:
         @classmethod
-        def from_pretrained(cls, repo_id: str, *, revision: str, trust_remote_code: bool, dtype: object) -> "FakeModel":
+        def from_pretrained(cls, repo_id: str, *, revision: str, trust_remote_code: bool, dtype: object, attn_implementation: str) -> "FakeModel":
             calls.append(("model_repo", repo_id))
             calls.append(("model_revision", revision))
             calls.append(("model_trust_remote_code", trust_remote_code))
             calls.append(("model_dtype", dtype))
+            calls.append(("attention", attn_implementation))
             return cls()
 
         def to(self, *args: object, **kwargs: object) -> "FakeModel":
@@ -182,6 +183,7 @@ async def test_moss_load_and_transcribe_use_official_helpers(monkeypatch: pytest
     assert ("processor_revision", revision) in calls
     assert ("model_trust_remote_code", True) in calls
     assert ("model_dtype", "auto") in calls
+    assert ("attention", "sdpa") in calls
     assert ("processor_trust_remote_code", True) in calls
     assert ("to_dtype", "bf16") in calls
     assert ("to_device", fake_device) in calls

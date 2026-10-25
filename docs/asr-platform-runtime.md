@@ -6,11 +6,11 @@
 
 应用仅在原 `18080` 提供工作台及 API。请求生成可信 `X-Request-ID` 和 `X-Trace-ID`；客户端输入不能覆盖服务 ID。关联事件、轮转和离线诊断见[诊断文档](asr-diagnostics.md)。
 
-所有 HTTP 推理入口使用同一个有界 `OperationScheduler`：短同步请求等待 Future，旧异步 job 保持内存 owner，工作台及编辑对齐保持个人持久 owner；管理员 load 同样排队。FIFO 按提交序号，不按模型重排；运行和等待项均计入 `ASR_MAX_QUEUED_JOBS`。同步接口原先超过十分钟自动返回 `202` job 的协议保留。卸载意图不排在整段转录后，活跃调用继续使用原 `unloading_scheduled` 保护。
+所有 HTTP 推理入口使用同一个有界 `OperationScheduler`：短同步请求等待 Future，旧异步 job 保持内存 owner，工作台及编辑对齐保持个人持久 owner；管理员 load 同样排队。FIFO 按提交序号，不按模型重排；空位释放后立即补入较早的持久任务，新请求准入前也先补队列，60 秒维护仅作恢复兜底；运行和等待项均计入 `ASR_MAX_QUEUED_JOBS`。同步接口原先超过十分钟自动返回 `202` job 的协议保留。卸载意图不排在整段转录后，活跃调用继续使用原 `unloading_scheduled` 保护。
 
 排队请求取消后移除票据。正在模型调用的取消等待当前调用安全结束；同一线程可见事件传到解码、扫描、分块及每个后续模型调用边界。业务取消不会终止调度 worker，任务终态在文件清理和配额释放后发布。
 
-`ASR_PREPROCESSING_PREFETCH=0` 为默认。开启时预备紧邻的一项，解码并发和预取深度均为 1，GPU 并发仍为 1；预备先取得完整输出 lease，不能获取余量时退回正常执行。准备失败、取消及关停均由资产 owner 清理。它不提供吞吐保证；本轮三轮真实对照观察到 RPC 间隔缩短，批次耗时范围仍重叠，详见 [WSL 验收](validation-2026-10-25-wsl-platform.md)。
+`ASR_PREPROCESSING_PREFETCH=0` 为默认。开启时预备紧邻的一项，解码并发和预取深度均为 1，GPU 并发仍为 1；预备先取得初始输出 lease，不能获取余量时退回正常执行。准备失败、取消及关停均由资产 owner 清理。容器时长仅用于初始估算；实际输出超过估算时，在落盘前重新检查个人/全局配额、临时额度与磁盘余量并扩大 lease，实际帧数始终受六小时上限约束。它不提供吞吐保证；本轮三轮真实对照观察到 RPC 间隔缩短，批次耗时范围仍重叠，详见 [WSL 验收](validation-2026-10-25-wsl-platform.md)。
 
 ## 解析与音频资产
 
@@ -24,7 +24,7 @@
 
 窗口按整数采样位置前进，显式零及非有限数受控拒绝。多个 VAD 区间共用追加前的 4096 块上限；扫描、合并和窗口循环均检查同一取消信号。
 
-工作台原始上传按所选模型规格只归一化一次，`NormalizedAudioAsset` 记录规格、帧数、PCM SHA256、owner 和 `pcm16-wav-v2` 版本；质量与普通流程借用同一文件。正常重试验证资产后复用，无重复解码。借用者不得删除原资产。新 WAV 使用确定的 44 字节头，质量 checkpoint 身份同时包含规范化、引擎、模型、pipeline、输入规格、请求、词库、aligner 和检测器身份。旧资产缺身份且已有 checkpoint 时明确拒绝混用，保留旧记录并要求新建任务。
+工作台原始上传按所选模型规格只归一化一次，`NormalizedAudioAsset` 记录规格、帧数、PCM SHA256、owner 和 `pcm16-wav-v2` 版本；质量与普通流程借用同一文件。正常重试验证资产后复用，无重复解码。同次操作直接传递已验证资产，借用时核对文件身份、大小及纳秒修改时间；跨恢复边界仍完整校验 PCM SHA256。质量检查点的完整文件摘要计算继续保留，避免改变既有身份。借用者不得删除原资产。新 WAV 使用确定的 44 字节头，质量 checkpoint 身份同时包含规范化、引擎、模型、pipeline、输入规格、请求、词库、aligner 和检测器身份。旧资产缺身份且已有 checkpoint 时明确拒绝混用，保留旧记录并要求新建任务。
 
 ## 工作台存储与查询
 
@@ -34,7 +34,7 @@ SQLite 使用 WAL；完整 repository 操作通过有界 executor 在线程内�
 
 `GET /api/jobs?view=summary&limit=50&before=<sequence>` 返回 `{jobs,next_cursor}`，不读取正文；limit 上限 100。`ids` 可限制活动任务轮询，保留 owner 条件。旧列表调用仍可用。详情返回 revision/ETag，`If-None-Match` 未变化时 `304`。前端只轮询活动任务，隐藏页降低频率，终态停止固定拉正文，编辑后主动失效刷新。管理员队列只含任务/模型/状态/时间/队列位置/chunk计数/错误码白名单。`/health` 返回缓存 GPU 快照及 `gpu_snapshot_at`，请求不触发 CUDA 查询。
 
-`POST /api/uploads/{id}/complete` 可选 `model`、`quality_profile`；不传时沿用可用 Qwen quality 默认。只展示和接受注册表声明的组合。基础第三引擎可只支持 legacy，不能接受对齐、字幕或 quality 请求；能力不足在解码前拒绝。更换模型/profile/引擎或规格不会复用旧幂等结果。新增引擎接口与 stub 见[接入模板](adding-asr-engine.md)，stub 不进入生产模型列表。现有 Qwen batch 如实声明串行。
+`POST /api/uploads/{id}/complete` 可选 `model`、`quality_profile`；不传时沿用可用 Qwen quality 默认。只展示和接受注册表声明的组合。基础第三引擎可只支持 legacy，不能接受对齐、字幕或 quality 请求；能力不足在解码前拒绝。更换模型/profile/引擎或规格不会复用旧幂等结果。新增引擎接口与 stub 见[接入模板](adding-asr-engine.md)，stub 不进入生产模型列表。现有 Qwen batch 如实声明串行。声明 `segment_timestamps` 的模型可使用真实段级时间导出字幕，状态为 `segment_timed`，不等于 word/char `aligned`；历史 `unavailable` 结果在范围、来源和完整文字核对通过后同样可导出。chunk 窗口不得充当字幕时间。模型推理依据及选用范围见[模型实践对照](asr-model-practices.md)。
 
 ## 配置与升级
 

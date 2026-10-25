@@ -64,6 +64,17 @@ class ResourceLease:
             await self._manager._release_pending(amount, self._device)
             self.pending_bytes -= amount
 
+    async def grow_persistent(self, size_bytes: int) -> None:
+        """Transfer additional, already admitted persistent bytes to this lease."""
+        if size_bytes < 0:
+            raise ValueError("reservation growth must be non-negative")
+        async with self._lock:
+            if self._released or self._persistent_key is None:
+                raise RuntimeError("persistent resource lease is unavailable")
+            await self._manager.grow_handoff(self, size_bytes)
+            self.size_bytes += size_bytes
+            self.pending_bytes += size_bytes
+
     async def release_unused(self) -> None:
         """After EOF, retain actual bytes and return the unused reservation."""
         async with self._lock:
@@ -235,6 +246,27 @@ class WorkspaceManager:
         except BaseException:
             await AudioWorkspace(root, upload_path, total, self).cleanup()
             raise
+
+    async def grow_handoff(self, lease: ResourceLease, size_bytes: int) -> None:
+        async with self._lock:
+            device, key = lease._device, lease._persistent_key
+            assert key is not None
+            handoffs = self._persistent_handoffs[device]
+            original, transferred = handoffs[key]
+            declarations = self._persistent_disk_bytes[device]
+            if declarations.get(key, 0) < transferred + size_bytes:
+                raise RuntimeError("persistent growth was not admitted")
+            previous = self._persistent_totals[device]
+            handoffs[key] = (original + size_bytes, transferred + size_bytes)
+            self._persistent_totals[device] = self._persistent_total(device, declarations)
+            try:
+                self._check_shared_budget(size_bytes, lease.root)
+            except BaseException:
+                handoffs[key] = (original, transferred)
+                self._persistent_totals[device] = previous
+                raise
+            self._pending_disk_bytes[device] = self._pending_disk_bytes.get(device, 0) + size_bytes
+            self._reserved_upload_bytes += size_bytes
 
     async def reserve_resource(self, size_bytes: int, root: Path) -> ResourceLease:
         lease = ResourceLease(self, root)

@@ -266,7 +266,11 @@ class _MossWorkerBackend:
             await self.unload(cuda_empty_cache=True)
         try:
             model = (
-                model_cls.from_pretrained(repo_id, revision=revision, trust_remote_code=True, dtype="auto")
+                # Official Transformers recipe recommends SDPA/FlashAttention;
+                # eager attention has quadratic memory cost on long recordings.
+                # This pinned remote-code revision declares _supports_sdpa.
+                model_cls.from_pretrained(repo_id, revision=revision, trust_remote_code=True, dtype="auto",
+                                          attn_implementation="sdpa")
                 .to(dtype=torch_dtype)
                 .to(torch_device)
                 .eval()
