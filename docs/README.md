@@ -4,7 +4,8 @@
 
 ## 使用与维护
 
-- [局域网工作台与 Qwen 质量流程](product-workbench.md)：账号、断点上传、七天任务保留、回听改字与字幕导出。
+- [局域网工作台与 Qwen 质量流程](product-workbench.md)：账号、断点上传、七天任务保留、长文搜索与跳转、回听改字及字幕导出。
+- [已接入模型的推理实践](asr-model-practices.md)：Qwen 官方 native helpers、音频规范化、生成预算、ForcedAligner 和 MOSS SDPA 的代码与官方来源对照。
 - [Qwen 质量评测](../evaluation/README.md)：开发/验收集、切分候选对照、CER/术语/字幕门槛。
 - [WSL 部署](wsl-deployment.md)：Windows / NVIDIA / WSL 前提、首次 GPU 验收、systemd、Windows 启动与局域网访问。
 - [MCP bridge](mcp-bridge.md)：客户端 stdio 配置、音频允许目录和八个工具。
@@ -19,6 +20,8 @@
 
 这些是对应版本和环境的历史证据，不代表所有硬件、发行版、模型或音频质量都已验证。
 
+- [2026-10-25 工作台界面与长转录](validation-2026-10-25-workbench-ui.md)：HCDS 主题、GSAP、固定视口与虚拟列表；10,800 段构造样本、手机布局、完整导出和前端覆盖发布。
+- [2026-10-25 审查修复与线上实测](validation-2026-10-25-review-fixes.md)：63 项线上检查、三模型有限样本 WER/CER、MOSS SDPA 探针及部署／数据完整性证据。
 - [2026-10-25 平台改进](validation-2026-10-25-platform.md)：A–E 实现、本地控制面性能、六小时资源、浏览器、迁移和回滚演练。
 - [2026-10-25 WSL 平台实机](validation-2026-10-25-wsl-platform.md)：真实 Qwen/MOSS、官方对齐、十分钟工作台、检查点恢复及 GPU 对比。
 - [2026-10-22 工作台本地工程验收](validation-2026-10-22-local-workbench.md)：mock 回归、浏览器流程、账号隔离、备份恢复与未验收项。

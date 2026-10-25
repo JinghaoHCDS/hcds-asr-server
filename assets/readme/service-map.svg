@@ -1,34 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-labelledby="title desc">
   <title id="title">一个局域网端口，两种入口，共用一台 GPU</title>
   <desc id="desc">浏览器通过带个人会话的 /api 接入工作台；Agent、CLI 和本地 MCP bridge 通过可选 Bearer 认证的 /v1 接入。两者由 18080 端口的 FastAPI 提供服务，共用单 worker FIFO 队列和 WSL 中的 NVIDIA GPU。网页任务持久化，v1 job 保存在内存。</desc>
-  <rect width="1200" height="440" rx="24" fill="#f8f9f7"/>
-  <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,sans-serif">
-    <text x="56" y="78" fill="#24383d" font-size="44" font-weight="650">一个端口，两种入口。</text>
+  <rect width="1200" height="440" rx="24" fill="#F7F7F4"/>
+  <g font-family="MiSans,PingFang SC,Microsoft YaHei,sans-serif">
+    <text x="56" y="78" fill="#343A46" font-size="44" font-weight="650">一个端口，两种入口。</text>
     <g id="browser-client">
-      <text x="56" y="169" fill="#24383d" font-size="32" font-weight="600">浏览器工作台</text>
-      <text x="56" y="210" fill="#637b72" font-size="24">/api · 个人账号与会话</text>
-      <text x="56" y="244" fill="#637b72" font-size="22">SQLite · 音频与版本保留</text>
+      <text x="56" y="169" fill="#343A46" font-size="32" font-weight="600">浏览器工作台</text>
+      <text x="56" y="210" fill="#787C83" font-size="24">/api · 个人账号与会话</text>
+      <text x="56" y="244" fill="#787C83" font-size="22">SQLite · 音频与版本保留</text>
     </g>
     <g id="agent-client">
-      <text x="56" y="311" fill="#24383d" font-size="30" font-weight="600">Agent / CLI / MCP</text>
-      <text x="56" y="352" fill="#637b72" font-size="24">/v1 · 可选 Bearer Token</text>
-      <text x="56" y="386" fill="#637b72" font-size="22">内存 job · 客户端保存结果</text>
+      <text x="56" y="311" fill="#343A46" font-size="30" font-weight="600">Agent / CLI / MCP</text>
+      <text x="56" y="352" fill="#787C83" font-size="24">/v1 · 可选 Bearer Token</text>
+      <text x="56" y="386" fill="#787C83" font-size="22">内存 job · 客户端保存结果</text>
     </g>
     <g id="shared-queue">
-      <rect x="442" y="139" width="370" height="251" rx="16" fill="#164b47"/>
-      <text x="474" y="187" fill="#d8eee4" font-size="22">同源网页与 API</text>
-      <text x="474" y="245" fill="#f8f9f7" font-size="36" font-weight="650">FastAPI :18080</text>
-      <path d="M474 271H780" stroke="#d8eee4" stroke-opacity=".35" stroke-width="2"/>
-      <text x="474" y="318" fill="#f8f9f7" font-size="28">单 worker FIFO</text>
-      <text x="474" y="359" fill="#d8eee4" font-size="23">排队执行 · 按需加载</text>
+      <rect x="442" y="139" width="370" height="251" rx="16" fill="#BECBEB"/>
+      <text x="474" y="187" fill="#343A46" font-size="22">同源网页与 API</text>
+      <text x="474" y="245" fill="#343A46" font-size="36" font-weight="650">FastAPI :18080</text>
+      <path d="M474 271H780" stroke="#343A46" stroke-opacity=".35" stroke-width="2"/>
+      <text x="474" y="318" fill="#343A46" font-size="28">单 worker FIFO</text>
+      <text x="474" y="359" fill="#343A46" font-size="23">排队执行 · 按需加载</text>
     </g>
-    <g id="wsl-inference" fill="#24383d">
-      <text x="924" y="185" fill="#637b72" font-size="24">WINDOWS → WSL</text>
+    <g id="wsl-inference" fill="#343A46">
+      <text x="924" y="185" fill="#787C83" font-size="24">WINDOWS → WSL</text>
       <text x="924" y="242" font-size="32" font-weight="650">NVIDIA GPU</text>
       <text x="924" y="302" font-size="27">Qwen3-ASR</text>
-      <text x="924" y="344" fill="#637b72" font-size="24">MOSS（可选）</text>
+      <text x="924" y="344" fill="#787C83" font-size="24">MOSS（可选）</text>
     </g>
-    <g id="connections" fill="none" stroke="#637b72" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <g id="connections" fill="none" stroke="#787C83" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M358 187H393V264H430m-9-9 9 9-9 9M358 329H393V264M824 264H908m-9-9 9 9-9 9"/>
     </g>
   </g>
