@@ -53,6 +53,13 @@ class WorkbenchService:
         self.store = WorkbenchStore(Path(settings.workbench_data_dir))
         self.lock = asyncio.Lock()
         self.stopping = False
+        self.draining = False
+        self.storage_ready = True
+        self.disk_ready = True
+        self.store.storage_error_callback = self.storage_failure
+        self.maintenance_at = time.monotonic()
+        self.maintenance_failures = 0
+        self.attempts: dict[str, dict[str, Any]] = {}
         self.maintenance: asyncio.Task[None] | None = None
         self.active: set[str] = set()
         self.process_lock: BinaryIO | None = None
@@ -67,11 +74,52 @@ class WorkbenchService:
         self.operation_leases: dict[str, ResourceLease] = {}
         self.playback_consumers: dict[str, int] = {}
 
+    def storage_failure(self, _error: BaseException) -> None:
+        self.storage_ready = False
+
     async def transaction(self, operation: Callable[[sqlite3.Connection], T]) -> T:
         def execute() -> T:
             with self.store.connection() as db:
                 return operation(db)
-        return await self.store.run(execute)
+        try:
+            return await self.store.run(execute)
+        except (sqlite3.Error, OSError):
+            self.storage_ready = False
+            raise
+
+    def readiness(self) -> dict[str, Any]:
+        reasons = []
+        if self.stopping or self.draining:
+            reasons.append("draining")
+        if not self.storage_ready:
+            reasons.append("storage_unavailable")
+        if not self.disk_ready:
+            reasons.append("disk_space_low")
+        if self.process_lock is None or self.maintenance is None or self.maintenance.done():
+            reasons.append("maintenance_unavailable")
+        elif time.monotonic() - self.maintenance_at > 180:
+            reasons.append("maintenance_unresponsive")
+        return {"ready": not reasons, "reasons": reasons}
+
+    def set_draining(self, draining: bool) -> None:
+        self.draining = draining
+        if draining:
+            for job_id in self.active:
+                context = self.contexts.get(job_id)
+                if context is not None:
+                    context.cancel_event.set()
+
+    def assert_accepting(self, model_id: str | None = None) -> None:
+        if self.stopping or self.draining:
+            raise AsrError(503, "service_draining", "service is saving progress for maintenance")
+        if not self.storage_ready or not self.disk_ready:
+            raise AsrError(503, "storage_unavailable", "persistent storage is temporarily unavailable")
+        if model_id is not None:
+            self.app.state.manager.assert_inference_available(model_id)
+
+    def attempt_arguments(self, job_id: str) -> dict[str, Any]:
+        attempt = self.attempts.get(job_id)
+        return {key: attempt[key] for key in ("attempt_id", "generation")} if attempt else {}
 
     async def sync_disk_reservations(self, projected: dict[str, int] | None = None) -> None:
         """Caller serializes DB changes with service.lock; settle even on cancel."""
@@ -140,6 +188,8 @@ class WorkbenchService:
             elif job["status"] == "cancel_requested" or job.get("cancel_requested"):
                 await self.finish_cancel(job)
             elif job["status"] not in TERMINAL:
+                if job.get("next_attempt_at"):
+                    continue
                 job["status"] = "queued"
                 job["progress"] = {"phase": "queued", "message": "recovering saved task"}
                 (await self.store.run(self.store.save_job, job))
@@ -180,14 +230,35 @@ class WorkbenchService:
         self.store.close()
 
     async def maintenance_loop(self) -> None:
+        next_cleanup = 0.0
         while True:
-            await asyncio.sleep(60)
-            await self.cleanup()
-            await self.fill_queue()
+            try:
+                if time.monotonic() >= next_cleanup:
+                    # A real, small transaction verifies write access without
+                    # scanning media during readiness requests.
+                    await self.transaction(lambda db: db.execute("INSERT INTO metadata(key,payload) VALUES('write_probe','1') ON CONFLICT(key) DO UPDATE SET payload='1'"))
+                    self.storage_ready = True
+                    disk = await self.store.run(shutil.disk_usage, self.store.root)
+                    self.disk_ready = disk.free >= self.settings.min_free_disk_mb * 1024 * 1024
+                    await self.cleanup()
+                    next_cleanup = time.monotonic() + 60
+                await self.fill_queue()
+                self.maintenance_failures = 0
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.maintenance_failures += 1
+                emit("maintenance.failed", diagnostics=safe_exception(exc), failures=self.maintenance_failures)
+            finally:
+                self.maintenance_at = time.monotonic()
+            await asyncio.sleep(min(30, max(1, 2 ** min(self.maintenance_failures, 4))))
 
     async def fill_queue(self) -> None:
-        if self.stopping:
+        if self.stopping or self.draining or not self.storage_ready:
             return
+        for job_id in await self.store.run(self.store.due_retry_jobs):
+            if job_id not in self.active:
+                await self.store.run(self.store.claim_due_retry, job_id)
         for job_id in await self.store.run(self.store.pending_jobs):
             try:
                 job = await self.store.run(self.store.job, job_id)
@@ -198,6 +269,10 @@ class WorkbenchService:
             if job["id"] in self.active:
                 continue
             if job.get("delete_requested") or job.get("cancel_requested"):
+                continue
+            if job.get("next_attempt_at"):
+                continue
+            if not self.app.state.manager.inference_readiness(job["request"]["model"]).get("ready", True):
                 continue
             pending_alignment = (job.get("result") or {}).get("alignment_status") == "pending"
             if job["status"] == "queued" or pending_alignment:
@@ -417,6 +492,7 @@ class WorkbenchService:
         return identity
 
     async def complete_upload(self, owner: str, upload_id: str, parameters: dict[str, Any]) -> dict[str, Any]:
+        self.assert_accepting()
         await self.store.run(self.upload, owner, upload_id)
         async with self.upload_lock(upload_id):
             upload = await self.store.run(self.upload, owner, upload_id)
@@ -443,6 +519,7 @@ class WorkbenchService:
             if not isinstance(key, str) or len(key) > 200:
                 raise AsrError(400, "bad_request", "invalid idempotency key")
             async with self.lock:
+                self.assert_accepting(request.model)
                 # Revalidate all mutable inputs after the full-file hash.
                 latest = await self.store.run(self.upload, owner, upload_id)
                 if latest["offset"] != upload["offset"] or latest["job_id"] is not None:
@@ -499,7 +576,8 @@ class WorkbenchService:
 
     def public_job(self, job: dict[str, Any], *, include_result: bool = True) -> dict[str, Any]:
         fields = {"id", "filename", "status", "revision", "created_at", "started_at", "completed_at", "expires_at",
-                  "progress", "error", "result", "model_revision", "audio_asset", "audio_size_bytes"}
+                  "progress", "error", "result", "model_revision", "audio_asset", "audio_size_bytes",
+                  "retryability", "next_action", "next_attempt_at", "completeness", "gaps", "recovery"}
         payload = {key: value for key, value in job.items() if key in fields}
         if not include_result:
             payload.pop("result", None)
@@ -510,6 +588,10 @@ class WorkbenchService:
 
     async def enqueue(self, job_id: str) -> None:
         job = await self.store.run(self.store.job, job_id)
+        context = self.context_for(job)
+        if context.cancel_event.is_set() and not self.cancelled(job_id):
+            context = context.with_fields(cancel_event=threading.Event())
+            self.contexts[job_id] = context
         await self.app.state.job_manager.enqueue_external(job_id, lambda: self.run_job(job_id), context=self.context_for(job),
             prepare=lambda: self.prepare_for_scheduler(job_id), dispose=lambda: self.dispose_preparation(job_id))
 
@@ -546,12 +628,12 @@ class WorkbenchService:
 
     def check_running(self, job_id: str) -> None:
         context = self.contexts.get(job_id)
-        if self.stopping or self.cancelled(job_id) or (context is not None and context.cancel_event.is_set()):
+        if self.stopping or self.draining or self.cancelled(job_id) or (context is not None and context.cancel_event.is_set()):
             raise WorkbenchInterrupted()
 
     def is_stopping(self) -> bool:
         # Re-evaluate after awaited cleanup; shutdown may have started meanwhile.
-        return self.stopping
+        return self.stopping or self.draining
 
     def terminal(self, job: dict[str, Any], status: str) -> None:
         job["status"] = status
@@ -654,6 +736,11 @@ class WorkbenchService:
         async def settle() -> None:
             current = await self.store.run(self.store.job_metadata, job_id)
             names = list(current.get("retained_file_bytes", {}))
+            # Merge reviews and unsuccessful final calls can write durable
+            # artifacts after the last successful chunk callback.
+            checkpoint_names = await self.store.run(lambda: [str(path.relative_to(root))
+                for path in (root / "checkpoints").rglob("*.json")])
+            names = sorted(set(names).union(checkpoint_names))
             await self.store.run(self.record_files_sync, job_id, names)
             current = await self.store.run(self.store.job_metadata, job_id)
             retained = sum(current.get("retained_file_bytes", {}).values())
@@ -791,13 +878,17 @@ class WorkbenchService:
                 self.check_running(job_id)
                 job = await self.store.run(self.store.job_metadata, job_id)
                 request = TranscriptionRequest(**job["request"])
+                self.assert_accepting(request.model)
                 definition = self.app.state.manager.runtime_for(request.model or self.app.state.manager.default_model_id).definition
                 if definition.revision != job["model_revision"] or (job.get("model_identity") is not None and await self.store.run(self.execution_identity, request) != job["model_identity"]):
                     raise AsrError(409, "resume_version_unavailable", "saved model revision is unavailable; retry as a new task")
+                self.attempts[job_id] = await self.store.run(self.store.begin_attempt, job_id,
+                    operation_id=(job.get("recovery") or {}).get("operation_id"))
+                job = await self.store.run(self.store.job_metadata, job_id)
                 job["started_at"] = job["started_at"] or now()
                 job["status"] = "preprocessing"
-                job["progress"] = {"phase": "preprocessing"}
-                await self.store.run(self.store.save_job, job)
+                job["progress"] = {**job.get("progress", {}), "phase": "preprocessing"}
+                await self.store.run(self.store.save_job, job, **self.attempt_arguments(job_id))
             prepared_error = self.preparation_errors.pop(job_id, None)
             if prepared_error is not None:
                 raise prepared_error
@@ -818,15 +909,17 @@ class WorkbenchService:
                     current = await self.store.run(self.store.job_metadata, job_id)
                     current["status"] = phase
                     current["progress"] = {**current["progress"], **self.progress[job_id]}
-                    await self.store.run(self.store.save_job, current)
+                    await self.store.run(self.store.save_job, current, **self.attempt_arguments(job_id))
                     self.progress_saved[job_id] = moment
             async def before_chunk(index: int, total: int) -> None:
                 await stage("transcribing", {"current_chunk": index + 1, "total_chunks": total})
             async def after_chunk(index: int, total: int, result: TranscriptionResult) -> None:
-                await self.record_files(job_id, [f"checkpoints/chunk-{index:05d}.json", "checkpoints/identity.json", "checkpoints/review-budget.json"])
+                names = await self.store.run(lambda: [str(path.relative_to(root)) for path in (root / "checkpoints").rglob("*.json")])
+                await self.record_files(job_id, names)
                 async with self.lock:
                     self.check_running(job_id)
-                    await self.store.run(self.store.save_chunk, job_id, {"index": index, "text": result.text}, total)
+                    await self.store.run(self.store.save_chunk, job_id, {"index": index, "text": result.text}, total,
+                        **self.attempt_arguments(job_id))
                     self.progress_saved[job_id] = time.monotonic()
             result = await run_transcription_path(
                 asset.path, workspace=workspace, manager=self.app.state.manager, settings=self.settings,
@@ -839,18 +932,23 @@ class WorkbenchService:
             await self.cleanup_operation(job_id)
             async with self.lock:
                 self.check_running(job_id)
-                job = await self.store.run(self.store.job_metadata, job_id)
+                job = await self.store.run(self.store.job, job_id)
+                self.result_version(result, job)
                 job["result"] = result
                 job["error"] = None
+                job["gaps"] = []
+                job["completeness"] = result.get("completeness", {"complete": True})
+                job["retryability"] = {"retryable": False, "reason": "completed"}
+                job["next_action"] = None
                 job["progress"] = {"phase": "completed", "percent": 100}
                 self.terminal(job, "completed")
-                await self.store.run(self.store.save_version, job)
+                await self.store.run(self.store.save_version, job, **self.attempt_arguments(job_id))
             emit("job.completed")
         except WorkbenchInterrupted:
             job = (await self.store.run(self.store.job_metadata, job_id))
             if self.cancelled(job_id):
                 await self.finish_cancel(job)
-            elif self.stopping:
+            elif self.is_stopping():
                 job["status"] = "queued"
                 job["progress"]["phase"] = "queued"
                 (await self.store.run(self.store.save_job, job))
@@ -860,7 +958,7 @@ class WorkbenchService:
             job = (await self.store.run(self.store.job_metadata, job_id))
             if self.cancelled(job_id):
                 await self.finish_cancel(job)
-            elif self.stopping:
+            elif self.is_stopping():
                 job["status"] = "queued"
                 job["progress"]["phase"] = "queued"
                 (await self.store.run(self.store.save_job, job))
@@ -872,7 +970,7 @@ class WorkbenchService:
             job = (await self.store.run(self.store.job_metadata, job_id))
             if self.cancelled(job_id):
                 await self.finish_cancel(job)
-            elif self.stopping:
+            elif self.is_stopping():
                 job["status"] = "queued"
                 job["progress"]["phase"] = "queued"
                 (await self.store.run(self.store.save_job, job))
@@ -889,10 +987,50 @@ class WorkbenchService:
                         (await self.store.run(self.store.save_job, current))
                     else:
                         error = exc if isinstance(exc, AsrError) else AsrError(500, "transcription_failed", "transcription failed")
-                        current["error"] = {"code": error.code, "message": error.message, "details": error.details}
+                        details = dict(error.details or {})
+                        partial = details.pop("partial_result", None)
+                        details.pop("partial_text", None)
+                        current["error"] = {"code": error.code, "message": error.message, "details": details}
+                        if error.code == "worker_circuit_open":
+                            from datetime import datetime, timedelta, timezone
+                            current["status"] = "queued"
+                            current["next_attempt_at"] = (datetime.now(timezone.utc) + timedelta(seconds=max(1, float(details.get("retry_after_seconds", 5))))).isoformat()
+                            current.setdefault("recovery", {})["next_attempt_at"] = current["next_attempt_at"]
+                            current["progress"] = {**current["progress"], "phase": "retry_wait", "next_attempt_at": current["next_attempt_at"]}
+                            current["next_action"] = "wait"
+                            await self.store.run(self.store.save_job, current)
+                            return
+                        from asr_server.lifecycle import is_recoverable_worker_error
+                        attempt = self.attempts.get(job_id)
+                        if attempt and is_recoverable_worker_error(error):
+                            try:
+                                await self.store.run(self.store.schedule_infrastructure_retry, job_id,
+                                    attempt["attempt_id"], attempt["generation"], current["error"],
+                                    delay_seconds=min(60, 5 * 2 ** int((current.get("recovery") or {}).get("infrastructure_retries", 0))),
+                                    retention_days=self.settings.workbench_retention_days)
+                                emit("job.retry_scheduled", error_code=error.code)
+                                return
+                            except AsrError as retry_error:
+                                if retry_error.code not in {"infrastructure_retry_exhausted", "retry_budget_exhausted"}:
+                                    raise
+                                details["recovery_stop_reason"] = retry_error.code
+                        if partial:
+                            current = await self.store.run(self.store.job, job_id)
+                            current["error"] = {"code": error.code, "message": error.message, "details": details}
+                            self.prepare_result(partial, segment_timestamps=definition.capabilities.segment_timestamps)
+                            self.result_version(partial, current)
+                            current["result"] = partial
+                            current["completeness"] = partial.get("completeness", {"complete": False})
+                            current["gaps"] = partial.get("gaps", details.get("gaps", []))
+                            retryable = partial.get("retryability", details.get("retryability", "exhausted"))
+                            current["retryability"] = {"retryable": retryable == "retry", "reason": retryable}
+                            current["next_action"] = partial.get("next_action", details.get("next_action", "listen_or_change_parameters"))
+                        else:
+                            current["retryability"] = {"retryable": error.code not in {"checkpoint_version_mismatch", "resume_version_unavailable", "audio_integrity_failed", "infrastructure_retry_exhausted", "recovery_attempt_exhausted"} and not is_recoverable_worker_error(error), "reason": error.code}
+                            current["next_action"] = "retry_from_start" if error.code in {"checkpoint_version_mismatch", "resume_version_unavailable"} else "retry" if current["retryability"]["retryable"] else "listen"
                         self.terminal(current, "failed")
                         current["progress"]["phase"] = "failed"
-                        (await self.store.run(self.store.save_job, current))
+                        await self.store.run(self.store.save_job, current, **self.attempt_arguments(job_id))
                         emit("job.failed", error_code=error.code, diagnostics=safe_exception(exc))
                 if finish_cancel:
                     await self.finish_cancel(current)
@@ -921,6 +1059,17 @@ class WorkbenchService:
                 pass
             self.progress.pop(job_id, None)
             self.progress_saved.pop(job_id, None)
+            attempt = self.attempts.pop(job_id, None)
+            if attempt is not None:
+                await self.store.run(self.store.finish_attempt, job_id, attempt["attempt_id"], attempt["generation"])
+
+    @staticmethod
+    def result_version(result: dict[str, Any], job: dict[str, Any]) -> None:
+        previous = job.get("result") or {}
+        version = int(previous.get("version", 0)) + 1
+        result["version"] = version
+        result["versions"] = [*previous.get("versions", []),
+            {"version": version, "created_at": now(), "alignment_status": result["alignment_status"]}]
 
     def prepare_result(self, result: dict[str, Any], *, segment_timestamps: bool = False) -> None:
         model_segments = bool(result.get("segments")) and segment_timestamps
@@ -1051,12 +1200,20 @@ class WorkbenchService:
                     await self.delete_now(job)
 
     async def retry(self, owner: str, job_id: str, *, from_start: bool = False) -> dict[str, Any]:
+        self.assert_accepting()
         async with self.lock:
             job = (await self.store.run(self.store.job, job_id, owner))
+            self.assert_accepting(job["request"]["model"])
             if job["status"] not in {"failed", "cancelled"}:
                 raise AsrError(409, "job_not_retryable", "only failed or cancelled tasks can be retried")
             if not (self.job_dir(job_id) / "audio.mp3").exists() and not (self.job_dir(job_id) / "source").exists():
                 raise AsrError(409, "source_unavailable", "original audio is unavailable")
+            retryability = job.get("retryability") or {}
+            if not from_start and isinstance(retryability, dict) and retryability.get("retryable") is False:
+                raise AsrError(409, "job_not_retryable", "saved recovery actions are exhausted; inspect the unresolved intervals",
+                    {"next_action": job.get("next_action"), "reason": retryability.get("reason")})
+            if not from_start:
+                await self.store.run(self.import_legacy_failure, job)
             if from_start:
                 checkpoint_root = self.job_dir(job_id) / "checkpoints"
                 if checkpoint_root.exists():
@@ -1068,11 +1225,19 @@ class WorkbenchService:
                     db.execute("DELETE FROM job_chunks WHERE job_id=?", (job_id,))
                 job["retained_file_bytes"] = {name: size for name, size in job.get("retained_file_bytes", {}).items() if not name.startswith("checkpoints/")}
             job["status"] = "queued"
+            job["queued_at"] = now()
             job["cancel_requested"] = False
             job["error"] = None
             job["completed_at"] = None
             job["expires_at"] = None
-            job["progress"] = {"phase": "queued", "percent": 0}
+            job["progress"] = {"phase": "queued", "percent": 0} if from_start else {**job.get("progress", {}), "phase": "queued"}
+            job.pop("next_attempt_at", None)
+            if job.get("recovery"):
+                # A user action starts one new operation, while the task-wide
+                # infrastructure counter and quality ledger remain intact.
+                job["recovery"] = {**job["recovery"], "operation_id": identifier("operation"), "operation_retries": 0,
+                    "active": False}
+                job["recovery"].pop("next_attempt_at", None)
             previous = self.context_for(job)
             context = previous.with_fields(attempt=previous.attempt + 1, cancel_event=threading.Event())
             self.contexts[job_id] = context
@@ -1082,9 +1247,38 @@ class WorkbenchService:
             await self.enqueue(job_id)
             return self.public_job(job)
 
+    def import_legacy_failure(self, job: dict[str, Any]) -> None:
+        """Freeze the original failure before retry clears it; never invent a call."""
+        checkpoint = self.job_dir(job["id"]) / "checkpoints"
+        path = checkpoint / "recovery-import.json"
+        error = job.get("error") or {}
+        details = error.get("details") or {}
+        if path.exists() or (checkpoint / "recovery-v1" / "state.json").exists():
+            return
+        if error.get("code") != "quality_incomplete" or details.get("cause") not in {"empty_transcription", "generation_truncated"}:
+            return
+        try:
+            identity = json.loads((checkpoint / "identity.json").read_text())
+            if not isinstance(identity, dict) or not isinstance(identity.get("fingerprint"), str):
+                raise ValueError("invalid checkpoint identity")
+        except (OSError, ValueError, TypeError) as exc:
+            raise AsrError(409, "checkpoint_corrupt", "saved checkpoint identity cannot be read") from exc
+        index = details.get("chunk_index")
+        windows = job.get("progress", {}).get("chunk_windows", [])
+        if not isinstance(index, int) or index < 0 or index >= len(windows) or windows[index] != [details.get("start"), details.get("end")]:
+            raise AsrError(409, "checkpoint_version_mismatch", "legacy failure does not match its saved chunk plan")
+        atomic_json(path, {"base_fingerprint": identity["fingerprint"],
+            "failed_chunks": [{"index": index, "cause": details["cause"], "start": details["start"], "end": details["end"]}],
+            "source_error_digest": fingerprint(error), "source_job_fingerprint": fingerprint({"request": job["request"],
+                "model_identity": job.get("model_identity"), "source_sha256": job.get("source_sha256"),
+                "audio_asset": job.get("audio_asset"), "normalized_asset": job.get("normalized_asset"), "chunk_windows": windows}),
+            "imported_at": now()})
+
     async def edit(self, owner: str, job_id: str, segment_id: str, text: str, base_version: int) -> dict[str, Any]:
+        self.assert_accepting()
         async with self.lock:
             job = (await self.store.run(self.store.job, job_id, owner))
+            self.assert_accepting(job["request"]["model"])
             result = job.get("result")
             if job["status"] != "completed" or result is None:
                 raise AsrError(409, "job_not_completed", "only completed transcripts can be edited")
@@ -1146,6 +1340,8 @@ class WorkbenchService:
             segment_id = result.get("pending_segment_id")
             if result["alignment_status"] != "pending" or not segment_id:
                 return
+            self.check_running(job_id)
+            self.attempts[job_id] = await self.store.run(self.store.begin_attempt, job_id, kind="alignment")
             target = next(s for s in result["segments"] if s["id"] == segment_id)
             asset = await self.prepare_audio(job_id)
             audio = AudioPath(asset.path, target["start"], target["end"])
@@ -1172,21 +1368,24 @@ class WorkbenchService:
                 ) else "incomplete"
                 result.pop("pending_segment_id", None)
                 result["versions"][-1]["alignment_status"] = result["alignment_status"]
-                (await self.store.run(self.store.save_version, job))
+                await self.store.run(self.store.save_version, job, **self.attempt_arguments(job_id))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             await self.cleanup_operation(job_id)
             job = (await self.store.run(self.store.job, job_id))
-            if self.stopping or job.get("delete_requested") or job.get("cancel_requested"):
+            if self.is_stopping() or job.get("delete_requested") or job.get("cancel_requested"):
                 return  # Keep pending alignment for recovery, or honor deletion.
             if job.get("result"):
                 result = job["result"]
                 result["alignment_status"] = "failed"
                 result["alignment_error"] = {"code": exc.code if isinstance(exc, AsrError) else "alignment_failed", "message": str(exc) if isinstance(exc, AsrError) else "alignment failed"}
                 result["versions"][-1]["alignment_status"] = "failed"
-                (await self.store.run(self.store.save_version, job))
+                await self.store.run(self.store.save_version, job, **self.attempt_arguments(job_id))
         finally:
+            attempt = self.attempts.pop(job_id, None)
+            if attempt is not None:
+                await self.store.run(self.store.finish_attempt, job_id, attempt["attempt_id"], attempt["generation"])
             try:
                 await self.cleanup_operation(job_id)
             except AsrError as exc:
@@ -1333,11 +1532,19 @@ def valid_segment_timing(result: dict[str, Any]) -> bool:
 
 def export_result(result: dict[str, Any], format_: str, *, segment_timestamps: bool = False) -> tuple[str, str]:
     if format_ == "txt":
-        return result["text"] + "\n", "text/plain"
+        gaps = result.get("gaps") or []
+        incomplete = result.get("completeness", {}).get("complete") is False
+        marker = "【不完整转录】\n" if incomplete else ""
+        if incomplete:
+            marker += "".join(f"缺口 {timestamp(float(gap['start']), vtt=True)}–{timestamp(float(gap['end']), vtt=True)}：{gap.get('reason', 'unresolved')}\n" for gap in gaps)
+            marker += "\n"
+        return marker + result["text"] + "\n", "text/plain"
     if format_ == "json":
         return json.dumps(result, ensure_ascii=False, indent=2) + "\n", "application/json"
     if format_ not in {"srt", "vtt"}:
         raise AsrError(400, "bad_request", "unsupported export format")
+    if result.get("completeness", {}).get("complete") is False or result.get("gaps"):
+        raise AsrError(409, "transcript_incomplete", "subtitles are unavailable while transcript intervals remain unresolved")
     model_timing = (segment_timestamps and result.get("alignment_status") in {"unavailable", "segment_timed"}
                     and valid_segment_timing(result))
     if result.get("alignment_status") != "aligned" and not model_timing:

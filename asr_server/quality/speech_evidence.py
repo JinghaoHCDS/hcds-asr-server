@@ -113,8 +113,8 @@ def non_speech_evidence(
 ) -> dict[str, object] | None:
     """Return reviewable negative VAD evidence only after complete dual scans.
 
-    Call only after ASR and its bounded acoustic reviews still returned no text.
-    The caller must preserve the source interval and mark it needs_review.
+    Use after empty ASR or to inspect an unaligned region of a recovery
+    candidate. Preserve the source interval and mark it needs_review.
     """
     global _MODEL_CACHE
     started = process_time()
@@ -187,3 +187,138 @@ def non_speech_evidence(
         }
     except Exception:
         return None
+
+
+def inspect_speech_evidence(
+    path: Path, start: float, end: float,
+    expected_identity: dict[str, object] | None = None,
+) -> dict[str, Any]:
+    """Offline diagnostic scan; it never authorizes transcription delivery.
+
+    Unlike the production negative-evidence predicate, inspect both complete
+    views after a threshold hit and report why a scan could not finish. VAD
+    probabilities identify speech-like model responses, not human speech,
+    omitted words, music, or sound effects. The latter stay unclassified.
+    No transcript, prompt, waveform samples, or source path is returned.
+    """
+    global _MODEL_CACHE
+    started = perf_counter()
+    deadline = started + _TIMEOUT_SECONDS
+    report: dict[str, Any] = {
+        "inspection_version": "speech-evidence-inspection-v1", "start": start, "end": end,
+        "status": "incomplete", "reason": "not_started", "acoustic_content": "unclassified",
+        "speech_presence": "not_established", "negative_evidence_established": False,
+        "authorizes_delivery": False, "views": [],
+    }
+
+    def finish(status: str, reason: str) -> dict[str, Any]:
+        report.update({"status": status, "reason": reason, "elapsed_ms": max(0.0, (perf_counter() - started) * 1000)})
+        return report
+
+    try:
+        try:
+            samples = _read_interval(path, start, end)
+        except (OSError, EOFError, wave.Error, ValueError) as error:
+            report["error_type"] = type(error).__name__
+            return finish("invalid_input", "audio_interval_unreadable")
+        if samples is None:
+            return finish("invalid_input", "audio_interval_invalid")
+        peak = max(abs(value) for value in samples)
+        report.update({"samples": len(samples), "peak_pcm16": peak, "sample_rate": _SAMPLE_RATE,
+                       "frame_samples": _FRAME_SAMPLES, "threshold": _THRESHOLD})
+        if not peak:
+            # This is a measured PCM property, independent of the VAD model.
+            report["acoustic_content"] = "digital_silence"
+            return finish("completed", "digital_silence")
+        gain = max(1.0, _TARGET_PEAK / (peak / 32768.0))
+        report["gain"] = gain
+        if not math.isfinite(gain) or gain > _MAX_GAIN:
+            return finish("unavailable", "required_gain_exceeds_limit")
+        verified = _verified_model()
+        if verified is None:
+            return finish("unavailable", "detector_unavailable_or_unverified")
+        identity, model_path = verified
+        report["detector_identity"] = identity
+        if expected_identity is not None and expected_identity != identity:
+            return finish("unavailable", "detector_identity_mismatch")
+        remaining = deadline - perf_counter()
+        if remaining <= 0:
+            return finish("incomplete", "deadline_exceeded")
+        if not _MODEL_LOCK.acquire(timeout=remaining):
+            return finish("incomplete", "model_lock_timeout")
+        try:
+            current = _verified_model()
+            if current is None or current[0] != identity or current[1] != model_path:
+                return finish("unavailable", "detector_changed_before_scan")
+            key = (str(model_path), _MODEL_SHA256)
+            if _MODEL_CACHE is None or _MODEL_CACHE[0] != key:
+                try:
+                    torch = importlib.import_module("torch")
+                except Exception as error:
+                    report["error_type"] = type(error).__name__
+                    return finish("unavailable", "runtime_unavailable")
+                try:
+                    model = torch.jit.load(str(model_path), map_location="cpu").eval()
+                except Exception as error:
+                    report["error_type"] = type(error).__name__
+                    return finish("unavailable", "detector_load_failed")
+                _MODEL_CACHE = (key, model, torch)
+            _key, model, torch = _MODEL_CACHE
+            frames = math.ceil(len(samples) / _FRAME_SAMPLES)
+            hits = 0
+            with torch.no_grad():
+                waveform = torch.frombuffer(samples, dtype=torch.int16).to(dtype=torch.float32).div_(32768.0)
+                for view_name, multiplier in (("original", 1.0), ("peak_gain", gain)):
+                    model.reset_states()
+                    view: dict[str, Any] = {"view": view_name, "multiplier": multiplier, "expected_frames": frames,
+                        "processed_frames": 0, "above_threshold_frames": 0, "max_probability": 0.0,
+                        "mean_probability": 0.0, "above_threshold_intervals": [], "above_threshold_interval_count": 0,
+                        "interval_limit": 32, "complete": False}
+                    report["views"].append(view)
+                    probability_sum = 0.0
+                    previous_hit = False
+                    for offset in range(0, len(samples), _FRAME_SAMPLES):
+                        if perf_counter() >= deadline:
+                            return finish("incomplete", "deadline_exceeded")
+                        frame = waveform[offset:offset + _FRAME_SAMPLES] * multiplier
+                        if frame.numel() < _FRAME_SAMPLES:
+                            frame = torch.nn.functional.pad(frame, (0, _FRAME_SAMPLES - frame.numel()))
+                        probability = float(model(frame, _SAMPLE_RATE).item())
+                        if perf_counter() >= deadline:
+                            return finish("incomplete", "deadline_exceeded")
+                        if not math.isfinite(probability) or not 0 <= probability <= 1:
+                            return finish("error", "model_probability_invalid")
+                        view["processed_frames"] += 1
+                        probability_sum += probability
+                        view["mean_probability"] = probability_sum / view["processed_frames"]
+                        view["max_probability"] = max(view["max_probability"], probability)
+                        above = probability >= _THRESHOLD
+                        if above:
+                            hits += 1
+                            view["above_threshold_frames"] += 1
+                            report["speech_presence"] = "model_candidates"
+                            first = start + offset / _SAMPLE_RATE
+                            last = min(end, start + (offset + _FRAME_SAMPLES) / _SAMPLE_RATE)
+                            intervals = view["above_threshold_intervals"]
+                            if previous_hit and view["above_threshold_interval_count"] <= 32:
+                                intervals[-1]["end"] = last
+                                intervals[-1]["frames"] += 1
+                                intervals[-1]["max_probability"] = max(intervals[-1]["max_probability"], probability)
+                            elif not previous_hit:
+                                view["above_threshold_interval_count"] += 1
+                                if len(intervals) < 32:
+                                    intervals.append({"start": first, "end": last, "frames": 1, "max_probability": probability})
+                        previous_hit = above
+                    view["complete"] = view["processed_frames"] == frames
+            current = _verified_model()
+            if current is None or current[0] != identity or current[1] != model_path:
+                return finish("unavailable", "detector_changed_during_scan")
+            if perf_counter() >= deadline:
+                return finish("incomplete", "deadline_exceeded")
+            report["negative_evidence_established"] = hits == 0
+            return finish("completed", "speech_like_probability_hits" if hits else "dual_scan_below_threshold")
+        finally:
+            _MODEL_LOCK.release()
+    except Exception as error:
+        report["error_type"] = type(error).__name__
+        return finish("error", "inspection_failed")

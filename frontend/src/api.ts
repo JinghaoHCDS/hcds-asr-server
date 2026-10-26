@@ -44,6 +44,9 @@ export interface Capabilities {
 }
 export interface Issue { code?: string; kind?: string; type?: string; message?: string; start?: number; end?: number; chunk_index?: number }
 export interface Segment { id: string; index: number; start: number; end: number; text: string; raw_text?: string; timestamps?: unknown[] }
+export interface Completeness { complete?: boolean | null; resolved_chunks?: number; total_chunks?: number; gap_count?: number; attempted_chunks?: number }
+export interface Gap { chunk_index: number; start: number; end: number; reason: string; alignment_status?: string; stop_reason?: string }
+export type Retryability = { retryable: boolean; reason?: string } | 'retry' | 'exhausted' | 'from_start_required';
 export interface Result {
   text: string;
   raw_text?: string;
@@ -53,6 +56,10 @@ export interface Result {
   alignment_status: 'aligned' | 'segment_timed' | 'pending' | 'failed' | 'unavailable' | 'incomplete';
   quality?: { issues?: Issue[]; profile_version?: string; validation_status?: string };
   changes?: unknown[];
+  completeness?: Completeness;
+  gaps?: Gap[];
+  retryability?: Retryability;
+  next_action?: string;
 }
 export interface Job {
   id: string;
@@ -68,7 +75,13 @@ export interface Job {
   model?: string;
   audio_asset?: AudioAsset;
   audio_size_bytes?: number;
-  progress?: { phase?: string; percent?: number; completed_chunks?: number; total_chunks?: number; current_chunk?: number; text?: string };
+  progress?: { phase?: string; percent?: number; completed_chunks?: number; resolved_chunks?: number; attempted_chunks?: number; total_chunks?: number; current_chunk?: number; text?: string; gap_count?: number; next_attempt_at?: string; start?: number; end?: number };
+  completeness?: Completeness;
+  gaps?: Gap[];
+  retryability?: Retryability;
+  next_action?: string | null;
+  next_attempt_at?: string;
+  recovery?: { infrastructure_retries?: number; operation_retries?: number; next_attempt_at?: string; last_error_code?: string };
   result?: Result | null;
   error?: { code: string; message: string } | null;
 }
@@ -93,7 +106,9 @@ export const errorNames: Record<string, string> = {
   audio_encoder_unavailable: '服务器缺少 MP3 编码器，请联系管理员。', audio_integrity_failed: '素材音轨未通过完整性校验，请检查文件后重试。',
   upload_offset_mismatch: '上传位置已变化，请重试以从服务器记录的位置继续。', upload_corrupt: '上传文件不完整，请重新上传。',
   job_not_retryable: '此任务当前无法重试。', cross_origin_request: '请从工作台自己的地址打开页面后重试。',
-  quality_incomplete: '部分音频未能完整转录，已有处理进度已保留，可回听检查后重试。',
+  quality_incomplete: '已处理，部分声音待回听确认。已保存可用文字与回听位置。',
+  inference_unavailable: '转录服务正在恢复，请稍后再试。', worker_quarantined: '转录设备正在隔离恢复，已有文字与回听仍可使用。',
+  attempt_superseded: '此轮处理已被取消或替代，请刷新任务。', infrastructure_retry_exhausted: '自动恢复次数已用完，已保存进度。',
   gpu_unavailable: '转录设备暂不可用，请联系管理员或稍后重试。', capability_not_supported: '服务尚未启用所需的转录或字幕对齐能力，请联系管理员。',
 };
 
@@ -128,9 +143,25 @@ export async function jobDetail(jobId: string, etag?: string): Promise<{ job?: J
 
 export function message(error: unknown): string { return error instanceof Error ? error.message : '操作失败，请重试'; }
 export const terminal = (status: string) => ['completed', 'failed', 'cancelled', 'expired'].includes(status);
-export const retryFromStart = (job: Job) => ['checkpoint_version_mismatch', 'resume_version_unavailable'].includes(job.error?.code || '');
+export const retryFromStart = (job: Job) => ['from_start', 'retry_from_start'].includes(job.next_action || job.result?.next_action || '') || (job.retryability || job.result?.retryability) === 'from_start_required';
+export const canRetry = (job: Job) => {
+  const policy = job.retryability || job.result?.retryability;
+  return (retryFromStart(job) || (typeof policy === 'object' ? policy.retryable : policy === 'retry')) && terminal(job.status);
+};
+export const retryLabel = (job: Job) => retryFromStart(job) ? '从头处理' : ['retry_alignment', 'resume_alignment'].includes(job.next_action || job.result?.next_action || '') ? '恢复字幕对齐' : '恢复未完成区间';
+export const completeness = (job: Job): Completeness => job.completeness?.total_chunks ? job.completeness : job.result?.completeness || {};
+export const progressText = (job: Job) => {
+  const done = completeness(job); const processing = !terminal(job.status) && !!job.progress?.total_chunks;
+  const total = processing ? job.progress?.total_chunks : done.total_chunks || job.progress?.total_chunks;
+  const resolved = processing ? job.progress?.resolved_chunks ?? job.progress?.completed_chunks ?? done.resolved_chunks ?? 0 : done.resolved_chunks ?? job.progress?.resolved_chunks ?? job.progress?.completed_chunks ?? 0;
+  const gaps = processing ? job.progress?.gap_count ?? done.gap_count ?? 0 : done.gap_count ?? job.progress?.gap_count ?? 0;
+  const attempted = processing ? job.progress?.attempted_chunks ?? done.attempted_chunks : done.attempted_chunks ?? job.progress?.attempted_chunks;
+  if (gaps > 0) return total ? `${attempted !== undefined ? `已处理 ${attempted} / ${total} 段` : `共 ${total} 段`}，${gaps} 处待确认` : `${gaps} 处待确认`;
+  return total ? `已解决 ${resolved} / ${total} 段` : '';
+};
+export const jobStatusLabel = (job: Job) => job.error?.code === 'quality_incomplete' && (completeness(job).gap_count || job.gaps?.length || job.result?.gaps?.length) ? '已处理，部分声音待回听确认' : phaseName(job.status);
 export const phaseNames: Record<string, string> = {
-  cleanup_pending: '正在清理临时音频',
+  cleanup_pending: '正在清理临时音频', retry_wait: '服务正在恢复', paused_for_release: '已保存进度，等待服务更新',
   queued: '排队中', preprocessing: '准备音频', splitting: '分析语音边界', loading_model: '准备模型',
   preparing_playback_audio: '准备回听音频', preparing_recognition_audio: '准备识别音频',
   transcribing: '转录中', reviewing: '复核片段', aligning: '对齐字幕', merging: '整理结果',

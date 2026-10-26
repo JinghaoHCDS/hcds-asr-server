@@ -159,7 +159,7 @@ async def test_quality_normalization_realigns_and_resumes_completed_chunks(tmp_p
         assert first["text"] == second["text"] == "Qwen3-ASR。"
         assert first["raw_text"] == "千问 ASR。"
         assert adapter.calls == [4096]
-        assert adapter.aligned == ["Qwen3-ASR。", "Qwen3-ASR。"]
+        assert adapter.aligned == ["Qwen3-ASR。"]  # Persisted normalization alignment is reused.
         assert first["timestamps"] == [TimestampItem("Qwen3-ASR", 0, 2, "word").to_api()]
         assert isinstance(first["quality"], dict) and first["quality"]["validated"] is False
     finally:
@@ -464,7 +464,7 @@ async def test_reviewed_empty_audio_uses_independent_evidence_and_keeps_audit_on
             assert isinstance(issues, list) and len(issues) == 4
             assert all(issue["kind"] == "empty_without_detected_speech" and issue["status"] == "needs_review" for issue in issues)
         assert inspected == [(0, 60), (60, 120), (120, 180), (180, 240)]
-        assert len(adapter.calls) == 5  # Four full inputs and one bounded, failed subwindow.
+        assert len(adapter.calls) == 6  # Four full inputs and both bounded review siblings.
         monkeypatch.setattr("asr_server.quality.pipeline.detector_identity", lambda: {**detector, "available": False})
         with pytest.raises(AsrError) as error:
             await run_transcription_path(source, workspace=tmp_path, manager=manager, settings=Settings(), request=request(), checkpoint_dir=tmp_path / "checkpoints")

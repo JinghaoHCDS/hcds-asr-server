@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import threading
 import time
 from collections.abc import Callable
 from multiprocessing.connection import Connection
@@ -23,6 +24,46 @@ class ProcessRpcTransport:
     poisons that generation and synchronously reaps it before returning.
     """
 
+    # A surviving generation may still own CUDA. Retain its Process handle
+    # across all adapters until exit has been proved, including other models.
+    _quarantined: dict[int, Any] = {}
+    _quarantine_lock = threading.RLock()
+
+    @classmethod
+    def quarantine_status(cls) -> dict[str, object]:
+        with cls._quarantine_lock:
+            for pid, process in list(cls._quarantined.items()):
+                if not process.is_alive():
+                    process.join(timeout=0)
+                    del cls._quarantined[pid]
+            return {"isolated": bool(cls._quarantined), "unreaped_workers": len(cls._quarantined)}
+
+    @classmethod
+    def assert_gpu_safe(cls) -> None:
+        if cls.quarantine_status()["isolated"]:
+            raise AsrError(503, "worker_isolated", "previous worker has not exited; GPU inference is isolated",
+                           {"worker_fatal": True, "worker_reaped": False, "retryable": False})
+
+    def configure_deadlines(self, *, chunk: float, alignment: float, native: float,
+                            observation: float = 300.0) -> None:
+        self._phase_deadlines = {"chunk": chunk, "alignment": alignment, "native": native}
+        self._observation_seconds = observation
+
+    def _phase_deadline(self, op: str, timeout: float, payload: dict[str, object]) -> tuple[str, float]:
+        phase = "load" if op == "load" else "control"
+        if op == "align_text":
+            phase = "alignment"
+        elif op in {"transcribe", "transcribe_batch"}:
+            phase = "native"
+            # Qwen short windows and native MOSS calls have different runtime
+            # envelopes. Unknown or unbounded input keeps the native deadline.
+            audio = payload.get("audio")
+            start, end = getattr(audio, "start", None), getattr(audio, "end", None)
+            if self.name.startswith("Qwen") and isinstance(start, (int, float)) and isinstance(end, (int, float)):
+                if 0 <= end - start <= 180:
+                    phase = "chunk"
+        return phase, self._phase_deadlines.get(phase, timeout)
+
     def __init__(
         self,
         *,
@@ -43,6 +84,9 @@ class ProcessRpcTransport:
         self._conn: Connection | None = None
         self._request_id = 0
         self._generation = 0
+        self._phase_deadlines = {}
+        self._observation_seconds = 300.0
+        self._poisoned = False
 
     @property
     def pid(self) -> int | None:
@@ -55,9 +99,12 @@ class ProcessRpcTransport:
         return bool(process is not None and process.is_alive())
 
     def start(self) -> None:
-        if self.is_alive and self._conn is not None:
+        self.assert_gpu_safe()
+        if self.is_alive and self._conn is not None and not self._poisoned:
             return
         self.close(force=True)
+        self.assert_gpu_safe()
+        self._poisoned = False
         context = multiprocessing.get_context("spawn")
         parent_conn, child_conn = context.Pipe()
         process = context.Process(
@@ -83,7 +130,7 @@ class ProcessRpcTransport:
     def request(self, op: str, *, timeout_seconds: float, **payload: object) -> Any:
         conn = self._conn
         process = self._process
-        if conn is None or process is None or not process.is_alive():
+        if self._poisoned or conn is None or process is None or not process.is_alive():
             self._fatal("worker_not_running", op=op)
         assert conn is not None
         assert process is not None
@@ -91,15 +138,23 @@ class ProcessRpcTransport:
         request_id = self._request_id
         worker_pid = process.pid
         started = time.perf_counter()
+        phase, timeout_seconds = self._phase_deadline(op, timeout_seconds, payload)
         try:
             conn.send(request_envelope(request_id, op, payload, current_context()))
-            if not conn.poll(timeout_seconds):
+            observation = min(self._observation_seconds, timeout_seconds)
+            ready = conn.poll(observation)
+            if not ready and observation < timeout_seconds:
+                emit("worker.deadline_observed", operation=op, phase=phase, worker_pid=worker_pid,
+                     worker_generation=self._generation, duration_ms=observation * 1000,
+                     deadline_seconds=timeout_seconds)
+                ready = conn.poll(max(0.0, timeout_seconds - (time.perf_counter() - started)))
+            if not ready:
                 self._fatal(
                     "worker_timeout",
                     op=op,
                     request_id=request_id,
                     worker_pid=worker_pid,
-                    details={"timeout_seconds": timeout_seconds},
+                    details={"timeout_seconds": timeout_seconds, "phase": phase},
                 )
             response = conn.recv()
         except AsrError:
@@ -122,6 +177,7 @@ class ProcessRpcTransport:
         if response.get("ok"):
             emit("worker.rpc_completed", level=logging.DEBUG, operation=op, rpc_request_id=request_id,
                  worker_pid=worker_pid, worker_generation=self._generation,
+                 phase=phase, deadline_seconds=timeout_seconds,
                  duration_ms=(time.perf_counter() - started) * 1000)
             return response.get("result")
         raw_error = response.get("error")
@@ -136,7 +192,9 @@ class ProcessRpcTransport:
              diagnostics=response.get("diagnostics"), duration_ms=(time.perf_counter() - started) * 1000)
         if status_code >= 500:
             details["worker_fatal"] = True
+            self._poisoned = True
             self.close(force=True)
+            details["worker_reaped"] = self._process is None
         raise AsrError(
             status_code,
             code,
@@ -163,25 +221,40 @@ class ProcessRpcTransport:
             # and multiprocessing resources. Give that path time to finish.
             process.join(timeout=timeout_seconds)
         self.close(force=True)
+        if self._process is not None:
+            raise AsrError(503, "worker_isolated", "model worker could not be reaped during shutdown",
+                           {"worker_fatal": True, "worker_reaped": False, "retryable": False})
 
     def close(self, *, force: bool) -> None:
         process = self._process
-        self._process = None
-        if process is not None:
-            process.join(timeout=0)
-            if force and process.is_alive():
+        self._close_connection()
+        if process is None:
+            return
+        self._poisoned = True
+        process.join(timeout=0)
+        if force and process.is_alive():
+            try:
                 process.terminate()
                 process.join(timeout=self._terminate_timeout_seconds)
-            if force and process.is_alive():
+            except OSError:
+                logger.exception("worker terminate failed")
+        if force and process.is_alive():
+            try:
                 process.kill()
                 process.join(timeout=self._kill_timeout_seconds)
-            if process.is_alive():
-                logger.error("failed to reap %s worker pid=%s", self.name, process.pid)
-            else:
-                emit("worker.reaped", worker_pid=process.pid, worker_generation=self._generation,
-                     exit_code=process.exitcode, engine_id=self.name)
-                process.close()
-        self._close_connection()
+            except OSError:
+                logger.exception("worker kill failed")
+        if process.is_alive():
+            with self._quarantine_lock:
+                self._quarantined[process.pid] = process
+            logger.error("failed to reap %s worker pid=%s; GPU isolated", self.name, process.pid)
+            return
+        with self._quarantine_lock:
+            self._quarantined.pop(process.pid, None)
+        emit("worker.reaped", worker_pid=process.pid, worker_generation=self._generation,
+             exit_code=process.exitcode, engine_id=self.name)
+        process.close()
+        self._process = None
 
     def _close_connection(self) -> None:
         conn = self._conn
@@ -218,5 +291,7 @@ class ProcessRpcTransport:
             request_id,
             payload["worker_pid"],
         )
+        self._poisoned = True
         self.close(force=True)
+        payload["worker_reaped"] = self._process is None
         raise AsrError(503, "worker_unavailable", f"{self.name} worker failure: {reason}", payload)

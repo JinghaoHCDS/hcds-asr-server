@@ -54,13 +54,15 @@ async def test_mp3_survives_terminal_pcm_cleanup_retry_edit_and_delete(tmp_path:
             job_id = await submit(service, user["id"], make_wav(2))
             failed = await wait_job(service, job_id)
             root = service.job_dir(job_id)
-            assert failed["status"] == "failed" and failed["audio_asset"]["state"] == "ready"
+            assert failed["status"] == "queued" and failed["progress"]["phase"] == "retry_wait"
+            assert failed["audio_asset"]["state"] == "ready"
             assert not (root / "source").exists() and not (root / "operation").exists()
             mp3 = (root / "audio.mp3").read_bytes()
             usage = (await client.get("/api/storage")).json()
             assert usage["temporary_bytes"] == usage["reserved_bytes"] == 0
             assert usage["saved_bytes"] == len(mp3)
-            await service.retry(user["id"], job_id)
+            await service.store.run(service.store.claim_due_retry, job_id, at="9999-01-01T00:00:00+00:00")
+            await service.fill_queue()
             completed = await wait_job(service, job_id)
             assert completed["status"] == "completed"
             assert (root / "audio.mp3").read_bytes() == mp3
@@ -113,6 +115,7 @@ async def test_changed_pcm_identity_refuses_checkpoint_and_allows_explicit_resta
         identity = service.job_dir(job_id) / "checkpoints/audio-identity.json"
         identity.write_text('{"retained_sha256":"changed"}')
         job["status"] = "failed"
+        job.pop("retryability", None)
         service.store.save_job(job)
         await service.retry("owner", job_id)
         mismatch = await wait_job(service, job_id)

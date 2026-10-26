@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 import socket
 import importlib
+import os
+import threading
+import time
 from html import escape
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -32,6 +35,7 @@ from asr_server.skill import MarkdownResponse, skill_archive, skill_base_url, sk
 from asr_server.lifecycle import ModelLifecycleManager
 from asr_server.registry import Backend, ModelDefinition, default_models
 from asr_server.engines import EngineRegistration, create_registered_adapter
+from asr_server.workers.transport import ProcessRpcTransport
 from asr_server.transcription import (
     SYNC_JOB_THRESHOLD_SECONDS,
     TranscriptionRequest,
@@ -42,6 +46,39 @@ from asr_server.transcription import (
 
 DOCS_DESCRIPTION_PATH = Path(__file__).resolve().parent.parent / "docs" / "docs-endpoint-capabilities.md"
 MCP_TUTORIAL_PATH = Path(__file__).resolve().parent.parent / "docs" / "mcp-bridge.md"
+
+
+class EventLoopWatchdog:
+    """Thread observes gateway heartbeat; GPU work already runs off-loop.
+
+    Enabled explicitly by deployment. A hard exit allows the process supervisor
+    to terminate the unit's remaining workers before restarting the gateway.
+    """
+
+    def __init__(self, timeout: float) -> None:
+        self.timeout = timeout
+        self.last_tick = time.monotonic()
+        self.stopped = threading.Event()
+        self.thread: threading.Thread | None = None
+
+    def tick(self) -> None:
+        self.last_tick = time.monotonic()
+
+    def start(self) -> None:
+        if self.timeout <= 0:
+            return
+        def monitor() -> None:
+            while not self.stopped.wait(min(5.0, self.timeout / 4)):
+                if time.monotonic() - self.last_tick > self.timeout:
+                    emit("gateway.event_loop_unresponsive", deadline_seconds=self.timeout)
+                    os._exit(70)
+        self.thread = threading.Thread(target=monitor, name="gateway-watchdog", daemon=True)
+        self.thread.start()
+
+    def close(self) -> None:
+        self.stopped.set()
+        if self.thread is not None:
+            self.thread.join(timeout=1)
 
 
 def gpu_health() -> dict[str, object]:
@@ -86,8 +123,16 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
     )
 
     def adapter_factory(model_id: str) -> AsrAdapter:
-        return create_registered_adapter(definitions[model_id], app_settings, engines=engines,
-                                         adapter_delay_seconds=adapter_delay_seconds)
+        adapter = create_registered_adapter(definitions[model_id], app_settings, engines=engines,
+                                            adapter_delay_seconds=adapter_delay_seconds)
+        transport = getattr(adapter, "_transport", None)
+        if isinstance(transport, ProcessRpcTransport):
+            transport.configure_deadlines(
+                chunk=app_settings.worker_chunk_timeout_seconds or app_settings.worker_inference_timeout_seconds,
+                alignment=app_settings.worker_alignment_timeout_seconds or app_settings.worker_inference_timeout_seconds,
+                native=app_settings.worker_native_timeout_seconds or app_settings.worker_inference_timeout_seconds,
+                observation=app_settings.worker_deadline_observation_seconds)
+        return adapter
 
     @asynccontextmanager
     async def lifespan(lifespan_app: FastAPI) -> AsyncIterator[None]:
@@ -104,12 +149,39 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
                 lifespan_app.state.gpu_snapshot_at = datetime.now(timezone.utc).isoformat()
                 await asyncio.sleep(30)
         gpu_sampler = asyncio.create_task(sample_gpu())
+        watchdog = EventLoopWatchdog(app_settings.gateway_watchdog_seconds)
+        supervisor: asyncio.Task[None] | None = None
         await job_manager.start()
         try:
             if app_settings.workbench_enabled:
                 await lifespan_app.state.workbench.start()
+            lifespan_app.state.started = True
+            async def supervise() -> None:
+                while True:
+                    watchdog.tick()
+                    try:
+                        scheduler = job_manager.scheduler
+                        if (not scheduler.closed and scheduler.running is None
+                                and (scheduler.worker is None or scheduler.worker.done())
+                                and not any(runtime.active_requests for runtime in manager._runtimes.values())
+                                and not ProcessRpcTransport.quarantine_status()["isolated"]):
+                            if scheduler.worker is not None and not scheduler.worker.cancelled():
+                                failure = scheduler.worker.exception()
+                                if failure is not None:
+                                    emit("scheduler.supervised_failure", diagnostics=safe_exception(failure))
+                            await scheduler.start()
+                    except Exception as exc:
+                        emit("scheduler.supervision_failed", diagnostics=safe_exception(exc))
+                    await asyncio.sleep(2)
+            supervisor = asyncio.create_task(supervise())
+            watchdog.start()
             yield
         finally:
+            lifespan_app.state.started = False
+            watchdog.close()
+            if supervisor is not None:
+                supervisor.cancel()
+                await asyncio.gather(supervisor, return_exceptions=True)
             if app_settings.workbench_enabled:
                 await lifespan_app.state.workbench.shutdown()
             await job_manager.shutdown()
@@ -141,9 +213,12 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         definitions,
         adapter_factory,
         idle_unload_seconds=app_settings.idle_unload_seconds,
+        circuit_failure_limit=app_settings.worker_circuit_failure_limit,
+        circuit_cooldown_seconds=app_settings.worker_circuit_cooldown_seconds,
     )
     app.state.gpu_snapshot = {"available": False, "name": None, "vram_total_mb": None}
     app.state.gpu_snapshot_at = None
+    app.state.started = False
     app.state.settings = app_settings
     app.state.workspace_manager = WorkspaceManager(app_settings)
     app.state.job_manager = JobManager(app.state.manager, app_settings)
@@ -157,6 +232,24 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
             "gpu": app.state.gpu_snapshot,
             "gpu_snapshot_at": app.state.gpu_snapshot_at,
         }
+
+    @app.get("/readyz", tags=["health"])
+    async def ready() -> JSONResponse:
+        """Inference admission readiness; existing retained data may remain usable."""
+        reasons: list[str] = []
+        if not app.state.started:
+            reasons.append("starting_or_stopping")
+        scheduler_state = app.state.job_manager.scheduler.readiness()
+        manager_state = app.state.manager.inference_readiness()
+        for state in (scheduler_state, manager_state):
+            reasons.extend(cast(list[str], state["reasons"]))
+        if app_settings.workbench_enabled:
+            state = app.state.workbench.readiness()
+            reasons.extend(cast(list[str], state.get("reasons", [])))
+        reasons = list(dict.fromkeys(reasons))
+        return JSONResponse(status_code=503 if reasons else 200,
+                            content={"status": "unavailable" if reasons else "ready", "reasons": reasons},
+                            headers={"Cache-Control": "no-store"})
 
     @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
     async def agent_aware_swagger_docs(request: Request) -> HTMLResponse:
@@ -240,6 +333,8 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         manager: ModelLifecycleManager = app.state.manager
         # Validate capability before spending a queue slot.
         manager.resolve_backend(manager.runtime_for(model_id), request.backend)
+        app.state.job_manager.scheduler.assert_accepting()
+        manager.assert_inference_available(model_id)
         await app.state.job_manager.start()
         return cast(dict[str, object], await app.state.job_manager.scheduler.wait(
             "load_" + uuid4().hex,
@@ -307,6 +402,8 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
             quality_profile=quality_profile,
         )
         validated = validate_transcription_request(manager, request)
+        app.state.job_manager.scheduler.assert_accepting()
+        manager.assert_inference_available(request.model)
         workspace = await app.state.workspace_manager.store_upload(file)
         transferred = False
         try:
@@ -405,6 +502,8 @@ def create_app(settings: Settings | None = None, adapter_delay_seconds: float = 
         )
         manager: ModelLifecycleManager = app.state.manager
         validate_transcription_request(manager, request)
+        app.state.job_manager.scheduler.assert_accepting()
+        manager.assert_inference_available(request.model)
         workspace = await app.state.workspace_manager.store_upload(file)
         job_manager: JobManager = app.state.job_manager
         try:

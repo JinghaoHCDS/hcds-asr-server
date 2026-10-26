@@ -195,3 +195,32 @@ def test_log_retention_expires_idle_files_and_rotates_by_utf8_bytes(tmp_path: Pa
         assert not list(tmp_path.glob("events.jsonl.*"))
     finally:
         handler.close()
+
+
+def test_recovery_events_preserve_bounded_diagnostics_without_content() -> None:
+    event = event_record('quality.recovery_attempt', recovery_policy_version='recovery-v1', attempt_id='attempt_abc',
+        call_key='chunk:4:language', requested_language='auto', effective_language='zh',
+        source_chunk_indices=[1, 2, 3, 4], model_language_labels=['Chinese'] * 4,
+        failures=3, cooldown_seconds=60, review_audio_seconds=180., budget_before_seconds=120.,
+        budget_after_seconds=180., next_attempt_at='2026-10-26T08:00:00+00:00', accepted=True,
+        text='private transcript', prompt='private prompt', audio='/private/source.wav',
+        context='private context', hotwords=['private term'], credentials='private token')
+    assert event['source_chunk_indices'] == [1, 2, 3]
+    assert event['model_language_labels'] == ['Chinese'] * 3
+    assert event['recovery_policy_version'] == 'recovery-v1' and event['attempt_id'] == 'attempt_abc'
+    assert event['effective_language'] == 'zh' and event['accepted'] is True
+    assert event['failures'] == 3 and event['cooldown_seconds'] == 60
+    assert event['budget_before_seconds'] == 120. and event['budget_after_seconds'] == 180.
+    assert event['next_attempt_at'] == '2026-10-26T08:00:00+00:00'
+    assert 'private' not in json.dumps(event)
+
+
+def test_recovery_events_drop_untrusted_labels_invalid_identifiers_and_numbers() -> None:
+    event = event_record('quality.recovery_attempt', attempt_id='/private/path',
+        requested_language='private transcript', effective_language='private_token',
+        source_chunk_indices=[-1, 2, 10**30], model_language_labels=['Chinese', 'private transcript', 'English'],
+        failures=10**1000, budget_after_seconds=float('nan'), cooldown_seconds=float('inf'),
+        next_attempt_at='private transcript', language_evidence={'text': 'private transcript'})
+    assert not {'attempt_id', 'requested_language', 'effective_language', 'source_chunk_indices',
+                'model_language_labels', 'failures', 'budget_after_seconds', 'cooldown_seconds',
+                'next_attempt_at', 'language_evidence'} & event.keys()

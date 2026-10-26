@@ -42,11 +42,38 @@ class OperationScheduler:
         self.condition = asyncio.Condition()
         self.sequence = 0
         self.closed = False
+        self.draining = False
         self.prefetch = prefetch
         self._preparation_slot = asyncio.Semaphore(1)
         self.refill: Callable[[], Awaitable[None]] | None = None
         self._admission_lock = asyncio.Lock()
         self._admitting_task: asyncio.Task[Any] | None = None
+
+    def readiness(self) -> dict[str, object]:
+        reasons = []
+        if self.closed:
+            reasons.append("scheduler_stopping")
+        if self.draining:
+            reasons.append("draining")
+        if self.worker is None or self.worker.done():
+            reasons.append("scheduler_unavailable")
+        return {"ready": not reasons, "reasons": reasons}
+
+    def assert_accepting(self) -> None:
+        if self.closed:
+            raise AsrError(503, "server_stopping", "inference scheduler is stopping")
+        if self.draining:
+            raise AsrError(503, "service_draining", "inference admission is paused for release",
+                           {"retryable": True})
+        if self.worker is not None and self.worker.done() and self.running is not None:
+            raise AsrError(503, "scheduler_unavailable", "scheduler stopped with an unconfirmed operation owner")
+
+    def set_draining(self, value: bool) -> None:
+        self.draining = value
+        async def wake() -> None:
+            async with self.condition:
+                self.condition.notify_all()
+        asyncio.create_task(wake())
 
     @asynccontextmanager
     async def admission(self) -> AsyncIterator[None]:
@@ -59,7 +86,7 @@ class OperationScheduler:
         async with self._admission_lock:
             self._admitting_task = task
             try:
-                if not self.closed and self.refill is not None and len(self.operations) < self.capacity:
+                if not self.closed and not self.draining and self.refill is not None and len(self.operations) < self.capacity:
                     await self.refill()
                 yield
             finally:
@@ -76,6 +103,8 @@ class OperationScheduler:
 
     async def start(self) -> None:
         if self.worker is None or self.worker.done():
+            if self.running is not None:
+                raise AsrError(503, "scheduler_unavailable", "cannot restart scheduler with unconfirmed active owner")
             self.closed = False
             self.worker = asyncio.create_task(self._loop())
 
@@ -92,8 +121,7 @@ class OperationScheduler:
                       prepare: Callable[[], Awaitable[None]] | None,
                       dispose: Callable[[], Awaitable[None]] | None) -> ScheduledOperation:
         async with self.condition:
-            if self.closed:
-                raise AsrError(503, "server_stopping", "inference scheduler is stopping")
+            self.assert_accepting()
             if key in self.operations:
                 return self.operations[key]
             if len(self.operations) >= self.capacity:
@@ -192,7 +220,7 @@ class OperationScheduler:
                             await self._dispose(operation)
 
     def _prefetch_next(self) -> None:
-        if self.prefetch and self.queue:
+        if self.prefetch and not self.draining and self.queue:
             following = self.operations[self.queue[0]]
             if following.prepare is not None and following.preparation is None:
                 following.preparation = asyncio.create_task(self._prepare(following))
@@ -220,7 +248,7 @@ class OperationScheduler:
     async def _loop(self) -> None:
         while True:
             async with self.condition:
-                await self.condition.wait_for(lambda: self.closed or bool(self.queue))
+                await self.condition.wait_for(lambda: self.closed or (bool(self.queue) and not self.draining))
                 if self.closed and not self.queue:
                     return
                 key = self.queue.popleft()

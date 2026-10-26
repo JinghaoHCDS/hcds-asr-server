@@ -320,3 +320,88 @@ def test_artifact_replaced_during_scan_invalidates_negative_evidence(detector: S
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(Model, "__call__", call)
         assert speech_evidence.non_speech_evidence(detector.path, 0, 1) is None
+
+
+@pytest.mark.parametrize("view", [0, 1])
+def test_offline_inspection_reports_probability_hits_without_classifying_sound(detector: SimpleNamespace, view: int) -> None:
+    detector.model.outputs[(view, 2)] = 0.8
+    detector.model.outputs[(view, 3)] = 0.9
+    report = speech_evidence.inspect_speech_evidence(detector.path, 0, 1)
+    assert report["status"] == "completed" and report["reason"] == "speech_like_probability_hits"
+    assert report["speech_presence"] == "model_candidates" and report["acoustic_content"] == "unclassified"
+    assert report["negative_evidence_established"] is False and report["authorizes_delivery"] is False
+    assert len(detector.model.calls) == 64  # Both views are complete despite the first threshold hit.
+    assert report["views"][view]["above_threshold_frames"] == 2
+    intervals = report["views"][view]["above_threshold_intervals"]
+    assert len(intervals) == 1 and intervals[0]["frames"] == 2
+    assert intervals[0]["start"] == 0.064 and intervals[0]["end"] == 0.128
+    assert intervals[0]["max_probability"] == 0.9
+    assert all(item["complete"] for item in report["views"])
+    assert str(detector.path) not in str(report) and "waveform" not in report
+
+
+def test_offline_negative_inspection_never_authorizes_delivery_or_labels_music(detector: SimpleNamespace) -> None:
+    identity = speech_evidence.detector_identity()
+    report = speech_evidence.inspect_speech_evidence(detector.path, 0, 1, identity)
+    assert report["status"] == "completed" and report["reason"] == "dual_scan_below_threshold"
+    assert report["negative_evidence_established"] is True
+    assert report["speech_presence"] == "not_established" and report["acoustic_content"] == "unclassified"
+    assert report["authorizes_delivery"] is False
+    assert all(item["above_threshold_frames"] == 0 for item in report["views"])
+    assert speech_evidence.detector_identity() == identity  # Production identity is unchanged.
+
+
+@pytest.mark.parametrize("failure,expected", [("gain", "required_gain_exceeds_limit"), ("detector", "detector_unavailable_or_unverified"), ("identity", "detector_identity_mismatch"), ("runtime", "runtime_unavailable"), ("load", "detector_load_failed")])
+def test_offline_inspection_separates_unavailable_evidence_from_probability_hits(detector: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str, expected: str) -> None:
+    identity = None
+    if failure == "gain":
+        write_wav(detector.path, array("h", [100]) * 16000)
+    elif failure == "detector":
+        detector.model_path.write_bytes(b"unverified")
+    elif failure == "identity":
+        identity = {**speech_evidence.detector_identity(), "threshold": 0.9}
+    elif failure == "runtime":
+        def unavailable(_name: str) -> Any:
+            raise ModuleNotFoundError("torch")
+        monkeypatch.setattr(importlib, "import_module", unavailable)
+    else:
+        def failed_load(*_args: object, **_kwargs: object) -> Any:
+            raise RuntimeError("unusable model")
+        detector.torch.jit.load = failed_load
+    report = speech_evidence.inspect_speech_evidence(detector.path, 0, 1, identity)
+    assert report["status"] == "unavailable" and report["reason"] == expected
+    assert report["speech_presence"] == "not_established" and report["negative_evidence_established"] is False
+    assert report["views"] == [] and report["acoustic_content"] == "unclassified"
+
+
+def test_offline_inspection_reports_partial_deadline_without_inventing_voice(detector: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(speech_evidence, "perf_counter", lambda: clock[0])
+    original_call = Model.__call__
+    def slow_call(model: Model, frame: Tensor, sample_rate: int) -> Any:
+        result = original_call(model, frame, sample_rate)
+        clock[0] = 60.0
+        return result
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Model, "__call__", slow_call)
+        report = speech_evidence.inspect_speech_evidence(detector.path, 0, 1)
+    assert report["status"] == "incomplete" and report["reason"] == "deadline_exceeded"
+    assert report["negative_evidence_established"] is False and report["speech_presence"] == "not_established"
+    assert report["views"][0]["complete"] is False
+    assert speech_evidence.non_speech_evidence(detector.path, 0, 1) is not None  # Lock was released.
+
+
+def test_offline_inspection_measures_digital_silence_without_detector(detector: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_wav(detector.path, array("h", [0]) * 16000)
+    monkeypatch.setattr(speech_evidence, "_verified_model", lambda: None)
+    report = speech_evidence.inspect_speech_evidence(detector.path, 0, 1)
+    assert report["status"] == "completed" and report["reason"] == "digital_silence"
+    assert report["acoustic_content"] == "digital_silence" and report["authorizes_delivery"] is False
+    assert detector.imports == []
+
+
+def test_offline_inspection_rejects_invalid_model_probability_as_failure(detector: SimpleNamespace) -> None:
+    detector.model.outputs[(0, 0)] = float("nan")
+    report = speech_evidence.inspect_speech_evidence(detector.path, 0, 1)
+    assert report["status"] == "error" and report["reason"] == "model_probability_invalid"
+    assert report["speech_presence"] == "not_established" and report["negative_evidence_established"] is False

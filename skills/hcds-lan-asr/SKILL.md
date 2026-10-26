@@ -118,3 +118,9 @@ All inference entry points share one bounded FIFO and one real model invocation 
 Errors use `{error: {code, message, details}}`. Handle `401 unauthorized` by correcting credentials; `422 capability_not_supported` by explaining the unmet requirement; `generation_truncated` by reporting failure and reviewing the explicit budget; `413` by checking limits; `429 job_queue_full` with bounded backoff, never a synchronous bypass. On `404 job_not_found`, distinguish restart/expiry from success. Retry transient failures only within a finite budget and never silently change a pinned model, profile or required capability.
 
 MCP is an alternative transport: `/docs/mcp` describes its client-side stdio bridge, local allowed roots and eight tools. Keep runtime capability discovery. Do not install GPU runtimes on a client, expose new server ports, invoke a WSL direct-GPU batch path, or claim streaming, vLLM, standalone `/v1/audio/alignments`, distributed inference or unvalidated hardware support.
+
+## 推理就绪与质量恢复
+
+`GET /readyz` 为轻量推理准入状态，200 可接单，503 暂不可接单；`/health` 只保持存活兼容。队列满仍返回429，不能通过改走同步绕过。worker熔断/隔离时保留数据读取能力，503不要无限重试。
+
+`/v1/**` 默认legacy和内存job语义不变；显式quality_v1使用独立recovery_v1.0策略，质量恢复有持久动作及30%音频预算。质量缺口仍返回quality_incomplete，不能把部分文字当完整成功；服务重启不保证恢复旧API临时输入。工作台持久恢复和个人部分结果属于/api/**，Bearer不授予工作台访问权限。

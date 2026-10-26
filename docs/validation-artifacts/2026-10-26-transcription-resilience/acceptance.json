@@ -1,0 +1,975 @@
+{
+  "date": "2026-10-26 Asia/Shanghai",
+  "runtime": {
+    "target": "WSL Arch Linux / RTX 5070 Ti 16GB",
+    "torch": "2.11.0+cu128",
+    "transformers": "5.18.0.dev0"
+  },
+  "local_tests": {
+    "passed": 515,
+    "skipped": 4,
+    "mypy_sources": 82,
+    "frontend_build": "passed",
+    "dependency_check": "passed"
+  },
+  "worker_exit_gpu_smoke": {
+    "mode": "real_gpu",
+    "started_at": 1793024366.6078103,
+    "scope": "isolated data and owned worker only",
+    "quality_acceptance": false,
+    "worker_exit": {
+      "error_code": "worker_unavailable",
+      "worker_reaped": true,
+      "debits": 1
+    },
+    "recovery": {
+      "victim": "completed",
+      "healthy": "completed",
+      "infrastructure_retries": 1
+    },
+    "storage": {
+      "saved_bytes": 630234,
+      "text_bytes": 62686,
+      "temporary_bytes": 0,
+      "reserved_bytes": 0,
+      "used_bytes": 692920,
+      "allocated_bytes": 692920,
+      "quota_bytes": 17179869184,
+      "available_bytes": 17179176264
+    },
+    "readyz_drain_reads": "passed",
+    "exports_range": "passed",
+    "status": "passed",
+    "elapsed_seconds": 29.121857166290283
+  },
+  "live_models": [
+    {
+      "model": "qwen3-asr-0.6b",
+      "status": "completed",
+      "error_code": null,
+      "text_chars": 46,
+      "segments": 0,
+      "elapsed_including_fifo_seconds": 358.0083434690023
+    },
+    {
+      "model": "moss-transcribe-diarize-0.9b",
+      "status": "completed",
+      "error_code": null,
+      "text_chars": 41,
+      "segments": 2,
+      "elapsed_including_fifo_seconds": 13.030622868973296
+    }
+  ],
+  "live_preservation": {
+    "observed_at": "2026-10-26T14:41:38.597055+00:00",
+    "schema": 5,
+    "jobs": 20,
+    "versions": 18,
+    "original_versions_unchanged": true,
+    "original_mp3_unchanged": true,
+    "all_original_checkpoints_unchanged": true,
+    "users_unchanged": true,
+    "glossary_unchanged": true,
+    "cases": [
+      {
+        "task": "JYQX2.mp3",
+        "status": "failed",
+        "error_code": "quality_incomplete",
+        "completeness": {
+          "complete": false,
+          "resolved_chunks": 118,
+          "total_chunks": 119,
+          "gap_count": 1,
+          "attempted_chunks": 119
+        },
+        "gaps": [
+          {
+            "chunk_index": 19,
+            "start": 1088.2,
+            "end": 1147.7,
+            "start_sample": 17411200,
+            "end_sample": 18363200,
+            "reason": "suspected_uncovered_audio",
+            "initial_cause": "empty_transcription",
+            "stop_reason": "review_attempt_limit",
+            "alignment_status": "unavailable"
+          }
+        ],
+        "text_chars": 10042,
+        "version": 1,
+        "review_audio_seconds": 815.9599999999994,
+        "review_budget_seconds": 2049.9912
+      },
+      {
+        "task": "MM1.mp3",
+        "status": "failed",
+        "error_code": "quality_incomplete",
+        "completeness": {
+          "complete": false,
+          "resolved_chunks": 70,
+          "total_chunks": 73,
+          "gap_count": 3,
+          "attempted_chunks": 73
+        },
+        "gaps": [
+          {
+            "chunk_index": 36,
+            "start": 2080.3,
+            "end": 2138.4,
+            "start_sample": 33284800,
+            "end_sample": 34214400,
+            "reason": "suspected_uncovered_audio",
+            "initial_cause": "empty_transcription",
+            "stop_reason": "review_attempt_limit",
+            "alignment_status": "unavailable"
+          },
+          {
+            "chunk_index": 37,
+            "start": 2138.4,
+            "end": 2197.1,
+            "start_sample": 34214400,
+            "end_sample": 35153600,
+            "reason": "empty_transcription",
+            "initial_cause": "empty_transcription",
+            "stop_reason": "review_attempt_limit",
+            "alignment_status": "unavailable"
+          },
+          {
+            "chunk_index": 47,
+            "start": 2717.7,
+            "end": 2775.1,
+            "start_sample": 43483200,
+            "end_sample": 44401600,
+            "reason": "empty_transcription",
+            "initial_cause": "suspected_repetition",
+            "stop_reason": "review_attempt_limit",
+            "alignment_status": "unavailable"
+          }
+        ],
+        "text_chars": 4634,
+        "version": 1,
+        "review_audio_seconds": 1247.8999999999996,
+        "review_budget_seconds": 1248.9325687499997
+      }
+    ],
+    "readyz": {
+      "status": "ready",
+      "reasons": []
+    },
+    "operation_pcm_files": 0
+  },
+  "rollback": {
+    "matching_old_source_and_schema4_restore": "passed",
+    "verified_files": 1146,
+    "old_code_rejects_schema5": true
+  },
+  "speech_evidence_inspection": [
+    {
+      "inspection_version": "speech-evidence-inspection-v1",
+      "start": 1088.2,
+      "end": 1147.7,
+      "status": "completed",
+      "reason": "speech_like_probability_hits",
+      "acoustic_content": "unclassified",
+      "speech_presence": "model_candidates",
+      "negative_evidence_established": false,
+      "authorizes_delivery": false,
+      "views": [
+        {
+          "view": "original",
+          "multiplier": 1.0,
+          "expected_frames": 1860,
+          "processed_frames": 1860,
+          "above_threshold_frames": 353,
+          "max_probability": 0.9999693632125854,
+          "mean_probability": 0.19464427624098957,
+          "above_threshold_intervals": [
+            {
+              "start": 1108.712,
+              "end": 1109.384,
+              "frames": 21,
+              "max_probability": 0.9987708926200867
+            },
+            {
+              "start": 1111.144,
+              "end": 1111.24,
+              "frames": 3,
+              "max_probability": 0.7976936101913452
+            },
+            {
+              "start": 1111.272,
+              "end": 1111.848,
+              "frames": 18,
+              "max_probability": 0.992084264755249
+            },
+            {
+              "start": 1112.7440000000001,
+              "end": 1113.288,
+              "frames": 17,
+              "max_probability": 0.9927086234092712
+            },
+            {
+              "start": 1115.048,
+              "end": 1116.392,
+              "frames": 42,
+              "max_probability": 0.999885082244873
+            },
+            {
+              "start": 1117.864,
+              "end": 1118.44,
+              "frames": 18,
+              "max_probability": 0.9994868040084839
+            },
+            {
+              "start": 1118.472,
+              "end": 1119.144,
+              "frames": 21,
+              "max_probability": 0.9996906518936157
+            },
+            {
+              "start": 1129.48,
+              "end": 1129.544,
+              "frames": 2,
+              "max_probability": 0.5745019316673279
+            },
+            {
+              "start": 1129.608,
+              "end": 1130.7920000000001,
+              "frames": 37,
+              "max_probability": 0.9983275532722473
+            },
+            {
+              "start": 1131.592,
+              "end": 1132.808,
+              "frames": 38,
+              "max_probability": 0.9999620914459229
+            },
+            {
+              "start": 1137.352,
+              "end": 1137.96,
+              "frames": 19,
+              "max_probability": 0.9991770386695862
+            },
+            {
+              "start": 1139.24,
+              "end": 1140.6480000000001,
+              "frames": 44,
+              "max_probability": 0.9998911619186401
+            },
+            {
+              "start": 1140.68,
+              "end": 1140.712,
+              "frames": 1,
+              "max_probability": 0.5000404119491577
+            },
+            {
+              "start": 1142.056,
+              "end": 1143.304,
+              "frames": 39,
+              "max_probability": 0.9999693632125854
+            },
+            {
+              "start": 1143.976,
+              "end": 1145.0320000000002,
+              "frames": 33,
+              "max_probability": 0.999896764755249
+            }
+          ],
+          "above_threshold_interval_count": 15,
+          "interval_limit": 32,
+          "complete": true
+        },
+        {
+          "view": "peak_gain",
+          "multiplier": 1.0,
+          "expected_frames": 1860,
+          "processed_frames": 1860,
+          "above_threshold_frames": 353,
+          "max_probability": 0.9999693632125854,
+          "mean_probability": 0.19464427624098957,
+          "above_threshold_intervals": [
+            {
+              "start": 1108.712,
+              "end": 1109.384,
+              "frames": 21,
+              "max_probability": 0.9987708926200867
+            },
+            {
+              "start": 1111.144,
+              "end": 1111.24,
+              "frames": 3,
+              "max_probability": 0.7976936101913452
+            },
+            {
+              "start": 1111.272,
+              "end": 1111.848,
+              "frames": 18,
+              "max_probability": 0.992084264755249
+            },
+            {
+              "start": 1112.7440000000001,
+              "end": 1113.288,
+              "frames": 17,
+              "max_probability": 0.9927086234092712
+            },
+            {
+              "start": 1115.048,
+              "end": 1116.392,
+              "frames": 42,
+              "max_probability": 0.999885082244873
+            },
+            {
+              "start": 1117.864,
+              "end": 1118.44,
+              "frames": 18,
+              "max_probability": 0.9994868040084839
+            },
+            {
+              "start": 1118.472,
+              "end": 1119.144,
+              "frames": 21,
+              "max_probability": 0.9996906518936157
+            },
+            {
+              "start": 1129.48,
+              "end": 1129.544,
+              "frames": 2,
+              "max_probability": 0.5745019316673279
+            },
+            {
+              "start": 1129.608,
+              "end": 1130.7920000000001,
+              "frames": 37,
+              "max_probability": 0.9983275532722473
+            },
+            {
+              "start": 1131.592,
+              "end": 1132.808,
+              "frames": 38,
+              "max_probability": 0.9999620914459229
+            },
+            {
+              "start": 1137.352,
+              "end": 1137.96,
+              "frames": 19,
+              "max_probability": 0.9991770386695862
+            },
+            {
+              "start": 1139.24,
+              "end": 1140.6480000000001,
+              "frames": 44,
+              "max_probability": 0.9998911619186401
+            },
+            {
+              "start": 1140.68,
+              "end": 1140.712,
+              "frames": 1,
+              "max_probability": 0.5000404119491577
+            },
+            {
+              "start": 1142.056,
+              "end": 1143.304,
+              "frames": 39,
+              "max_probability": 0.9999693632125854
+            },
+            {
+              "start": 1143.976,
+              "end": 1145.0320000000002,
+              "frames": 33,
+              "max_probability": 0.999896764755249
+            }
+          ],
+          "above_threshold_interval_count": 15,
+          "interval_limit": 32,
+          "complete": true
+        }
+      ],
+      "samples": 952000,
+      "peak_pcm16": 32768,
+      "sample_rate": 16000,
+      "frame_samples": 512,
+      "threshold": 0.5,
+      "gain": 1.0,
+      "detector_identity": {
+        "available": true,
+        "detector": "silero-vad",
+        "version": "6.2.3",
+        "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+        "sample_rate": 16000,
+        "frame_samples": 512,
+        "threshold": 0.5,
+        "target_peak": 0.9,
+        "max_gain": 100,
+        "timeout_seconds": 60.0
+      },
+      "elapsed_ms": 1459.0003069897648,
+      "task": "JYQX2.mp3",
+      "chunk_index": 19
+    },
+    {
+      "inspection_version": "speech-evidence-inspection-v1",
+      "start": 2080.3,
+      "end": 2138.4,
+      "status": "completed",
+      "reason": "speech_like_probability_hits",
+      "acoustic_content": "unclassified",
+      "speech_presence": "model_candidates",
+      "negative_evidence_established": false,
+      "authorizes_delivery": false,
+      "views": [
+        {
+          "view": "original",
+          "multiplier": 1.0,
+          "expected_frames": 1816,
+          "processed_frames": 1816,
+          "above_threshold_frames": 15,
+          "max_probability": 0.729913592338562,
+          "mean_probability": 0.020181115215777555,
+          "above_threshold_intervals": [
+            {
+              "start": 2121.0040000000004,
+              "end": 2121.068,
+              "frames": 2,
+              "max_probability": 0.5674619078636169
+            },
+            {
+              "start": 2123.404,
+              "end": 2123.5640000000003,
+              "frames": 5,
+              "max_probability": 0.7119089365005493
+            },
+            {
+              "start": 2123.596,
+              "end": 2123.628,
+              "frames": 1,
+              "max_probability": 0.5635473728179932
+            },
+            {
+              "start": 2124.652,
+              "end": 2124.684,
+              "frames": 1,
+              "max_probability": 0.540164589881897
+            },
+            {
+              "start": 2125.164,
+              "end": 2125.26,
+              "frames": 3,
+              "max_probability": 0.5699508190155029
+            },
+            {
+              "start": 2126.4120000000003,
+              "end": 2126.5080000000003,
+              "frames": 3,
+              "max_probability": 0.729913592338562
+            }
+          ],
+          "above_threshold_interval_count": 6,
+          "interval_limit": 32,
+          "complete": true
+        },
+        {
+          "view": "peak_gain",
+          "multiplier": 3.000122075279756,
+          "expected_frames": 1816,
+          "processed_frames": 1816,
+          "above_threshold_frames": 34,
+          "max_probability": 0.9342401623725891,
+          "mean_probability": 0.026272781976866572,
+          "above_threshold_intervals": [
+            {
+              "start": 2123.404,
+              "end": 2123.98,
+              "frames": 18,
+              "max_probability": 0.9342401623725891
+            },
+            {
+              "start": 2124.108,
+              "end": 2124.364,
+              "frames": 8,
+              "max_probability": 0.9290614128112793
+            },
+            {
+              "start": 2124.492,
+              "end": 2124.588,
+              "frames": 3,
+              "max_probability": 0.568574070930481
+            },
+            {
+              "start": 2124.652,
+              "end": 2124.684,
+              "frames": 1,
+              "max_probability": 0.8400072455406189
+            },
+            {
+              "start": 2126.4120000000003,
+              "end": 2126.54,
+              "frames": 4,
+              "max_probability": 0.8119190335273743
+            }
+          ],
+          "above_threshold_interval_count": 5,
+          "interval_limit": 32,
+          "complete": true
+        }
+      ],
+      "samples": 929600,
+      "peak_pcm16": 9830,
+      "sample_rate": 16000,
+      "frame_samples": 512,
+      "threshold": 0.5,
+      "gain": 3.000122075279756,
+      "detector_identity": {
+        "available": true,
+        "detector": "silero-vad",
+        "version": "6.2.3",
+        "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+        "sample_rate": 16000,
+        "frame_samples": 512,
+        "threshold": 0.5,
+        "target_peak": 0.9,
+        "max_gain": 100,
+        "timeout_seconds": 60.0
+      },
+      "elapsed_ms": 583.6665959795937,
+      "task": "MM1.mp3",
+      "chunk_index": 36
+    },
+    {
+      "inspection_version": "speech-evidence-inspection-v1",
+      "start": 2138.4,
+      "end": 2197.1,
+      "status": "completed",
+      "reason": "speech_like_probability_hits",
+      "acoustic_content": "unclassified",
+      "speech_presence": "model_candidates",
+      "negative_evidence_established": false,
+      "authorizes_delivery": false,
+      "views": [
+        {
+          "view": "original",
+          "multiplier": 1.0,
+          "expected_frames": 1835,
+          "processed_frames": 1835,
+          "above_threshold_frames": 8,
+          "max_probability": 0.9076741337776184,
+          "mean_probability": 0.008823458465441985,
+          "above_threshold_intervals": [
+            {
+              "start": 2139.4880000000003,
+              "end": 2139.712,
+              "frames": 7,
+              "max_probability": 0.9076741337776184
+            },
+            {
+              "start": 2185.28,
+              "end": 2185.312,
+              "frames": 1,
+              "max_probability": 0.5765801072120667
+            }
+          ],
+          "above_threshold_interval_count": 2,
+          "interval_limit": 32,
+          "complete": true
+        },
+        {
+          "view": "peak_gain",
+          "multiplier": 3.158530577273214,
+          "expected_frames": 1835,
+          "processed_frames": 1835,
+          "above_threshold_frames": 11,
+          "max_probability": 0.9479881525039673,
+          "mean_probability": 0.009075740397135238,
+          "above_threshold_intervals": [
+            {
+              "start": 2138.6240000000003,
+              "end": 2138.656,
+              "frames": 1,
+              "max_probability": 0.51335608959198
+            },
+            {
+              "start": 2138.688,
+              "end": 2138.752,
+              "frames": 2,
+              "max_probability": 0.5525625348091125
+            },
+            {
+              "start": 2139.4880000000003,
+              "end": 2139.744,
+              "frames": 8,
+              "max_probability": 0.9479881525039673
+            }
+          ],
+          "above_threshold_interval_count": 3,
+          "interval_limit": 32,
+          "complete": true
+        }
+      ],
+      "samples": 939200,
+      "peak_pcm16": 9337,
+      "sample_rate": 16000,
+      "frame_samples": 512,
+      "threshold": 0.5,
+      "gain": 3.158530577273214,
+      "detector_identity": {
+        "available": true,
+        "detector": "silero-vad",
+        "version": "6.2.3",
+        "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+        "sample_rate": 16000,
+        "frame_samples": 512,
+        "threshold": 0.5,
+        "target_peak": 0.9,
+        "max_gain": 100,
+        "timeout_seconds": 60.0
+      },
+      "elapsed_ms": 609.0961270092521,
+      "task": "MM1.mp3",
+      "chunk_index": 37
+    },
+    {
+      "inspection_version": "speech-evidence-inspection-v1",
+      "start": 2717.7,
+      "end": 2775.1,
+      "status": "completed",
+      "reason": "speech_like_probability_hits",
+      "acoustic_content": "unclassified",
+      "speech_presence": "model_candidates",
+      "negative_evidence_established": false,
+      "authorizes_delivery": false,
+      "views": [
+        {
+          "view": "original",
+          "multiplier": 1.0,
+          "expected_frames": 1794,
+          "processed_frames": 1794,
+          "above_threshold_frames": 385,
+          "max_probability": 0.9999017715454102,
+          "mean_probability": 0.2237269875552768,
+          "above_threshold_intervals": [
+            {
+              "start": 2719.428,
+              "end": 2720.3239999999996,
+              "frames": 28,
+              "max_probability": 0.9981878399848938
+            },
+            {
+              "start": 2721.1879999999996,
+              "end": 2721.22,
+              "frames": 1,
+              "max_probability": 0.5851106643676758
+            },
+            {
+              "start": 2721.348,
+              "end": 2721.636,
+              "frames": 9,
+              "max_probability": 0.9701294898986816
+            },
+            {
+              "start": 2722.692,
+              "end": 2723.076,
+              "frames": 12,
+              "max_probability": 0.9680162072181702
+            },
+            {
+              "start": 2723.1079999999997,
+              "end": 2723.908,
+              "frames": 25,
+              "max_probability": 0.9917566776275635
+            },
+            {
+              "start": 2726.308,
+              "end": 2726.3399999999997,
+              "frames": 1,
+              "max_probability": 0.5817691683769226
+            },
+            {
+              "start": 2729.348,
+              "end": 2730.7239999999997,
+              "frames": 43,
+              "max_probability": 0.9971039891242981
+            },
+            {
+              "start": 2731.236,
+              "end": 2734.692,
+              "frames": 108,
+              "max_probability": 0.9998816251754761
+            },
+            {
+              "start": 2735.652,
+              "end": 2737.828,
+              "frames": 68,
+              "max_probability": 0.9999017715454102
+            },
+            {
+              "start": 2743.332,
+              "end": 2743.7799999999997,
+              "frames": 14,
+              "max_probability": 0.9946193695068359
+            },
+            {
+              "start": 2744.3559999999998,
+              "end": 2744.388,
+              "frames": 1,
+              "max_probability": 0.6379267573356628
+            },
+            {
+              "start": 2745.508,
+              "end": 2745.988,
+              "frames": 15,
+              "max_probability": 0.9166960716247559
+            },
+            {
+              "start": 2746.02,
+              "end": 2746.308,
+              "frames": 9,
+              "max_probability": 0.92094886302948
+            },
+            {
+              "start": 2746.564,
+              "end": 2746.596,
+              "frames": 1,
+              "max_probability": 0.5109516382217407
+            },
+            {
+              "start": 2747.0119999999997,
+              "end": 2747.1079999999997,
+              "frames": 3,
+              "max_probability": 0.8293314576148987
+            },
+            {
+              "start": 2747.172,
+              "end": 2747.364,
+              "frames": 6,
+              "max_probability": 0.7153122425079346
+            },
+            {
+              "start": 2747.652,
+              "end": 2747.716,
+              "frames": 2,
+              "max_probability": 0.5802229642868042
+            },
+            {
+              "start": 2747.8439999999996,
+              "end": 2748.196,
+              "frames": 11,
+              "max_probability": 0.7480950355529785
+            },
+            {
+              "start": 2750.18,
+              "end": 2750.468,
+              "frames": 9,
+              "max_probability": 0.9449337720870972
+            },
+            {
+              "start": 2751.62,
+              "end": 2751.8759999999997,
+              "frames": 8,
+              "max_probability": 0.883151113986969
+            },
+            {
+              "start": 2752.964,
+              "end": 2753.028,
+              "frames": 2,
+              "max_probability": 0.669569194316864
+            },
+            {
+              "start": 2757.252,
+              "end": 2757.54,
+              "frames": 9,
+              "max_probability": 0.8893417716026306
+            }
+          ],
+          "above_threshold_interval_count": 22,
+          "interval_limit": 32,
+          "complete": true
+        },
+        {
+          "view": "peak_gain",
+          "multiplier": 1.378029064062427,
+          "expected_frames": 1794,
+          "processed_frames": 1794,
+          "above_threshold_frames": 382,
+          "max_probability": 0.9999334812164307,
+          "mean_probability": 0.22260803827784525,
+          "above_threshold_intervals": [
+            {
+              "start": 2719.428,
+              "end": 2720.3239999999996,
+              "frames": 28,
+              "max_probability": 0.9987950325012207
+            },
+            {
+              "start": 2721.1879999999996,
+              "end": 2721.22,
+              "frames": 1,
+              "max_probability": 0.6311348080635071
+            },
+            {
+              "start": 2721.348,
+              "end": 2721.636,
+              "frames": 9,
+              "max_probability": 0.9847570061683655
+            },
+            {
+              "start": 2722.692,
+              "end": 2723.908,
+              "frames": 38,
+              "max_probability": 0.9951554536819458
+            },
+            {
+              "start": 2726.308,
+              "end": 2726.3399999999997,
+              "frames": 1,
+              "max_probability": 0.5590487718582153
+            },
+            {
+              "start": 2729.348,
+              "end": 2730.7239999999997,
+              "frames": 43,
+              "max_probability": 0.9968897700309753
+            },
+            {
+              "start": 2731.236,
+              "end": 2734.692,
+              "frames": 108,
+              "max_probability": 0.9999244213104248
+            },
+            {
+              "start": 2735.652,
+              "end": 2737.828,
+              "frames": 68,
+              "max_probability": 0.9999334812164307
+            },
+            {
+              "start": 2743.332,
+              "end": 2743.7799999999997,
+              "frames": 14,
+              "max_probability": 0.9950549602508545
+            },
+            {
+              "start": 2744.3559999999998,
+              "end": 2744.388,
+              "frames": 1,
+              "max_probability": 0.5566563606262207
+            },
+            {
+              "start": 2745.508,
+              "end": 2745.604,
+              "frames": 3,
+              "max_probability": 0.7593807578086853
+            },
+            {
+              "start": 2745.6679999999997,
+              "end": 2745.7,
+              "frames": 1,
+              "max_probability": 0.5689012408256531
+            },
+            {
+              "start": 2745.732,
+              "end": 2745.988,
+              "frames": 8,
+              "max_probability": 0.9250479936599731
+            },
+            {
+              "start": 2746.02,
+              "end": 2746.308,
+              "frames": 9,
+              "max_probability": 0.9123731851577759
+            },
+            {
+              "start": 2746.564,
+              "end": 2746.596,
+              "frames": 1,
+              "max_probability": 0.510815441608429
+            },
+            {
+              "start": 2747.0119999999997,
+              "end": 2747.1079999999997,
+              "frames": 3,
+              "max_probability": 0.7834374308586121
+            },
+            {
+              "start": 2747.172,
+              "end": 2747.364,
+              "frames": 6,
+              "max_probability": 0.7093696594238281
+            },
+            {
+              "start": 2747.62,
+              "end": 2747.716,
+              "frames": 3,
+              "max_probability": 0.5916827917098999
+            },
+            {
+              "start": 2747.8439999999996,
+              "end": 2748.196,
+              "frames": 11,
+              "max_probability": 0.7985817193984985
+            },
+            {
+              "start": 2750.18,
+              "end": 2750.468,
+              "frames": 9,
+              "max_probability": 0.9529932737350464
+            },
+            {
+              "start": 2751.62,
+              "end": 2751.8759999999997,
+              "frames": 8,
+              "max_probability": 0.8817586898803711
+            },
+            {
+              "start": 2752.964,
+              "end": 2753.028,
+              "frames": 2,
+              "max_probability": 0.6105678677558899
+            },
+            {
+              "start": 2757.2839999999997,
+              "end": 2757.508,
+              "frames": 7,
+              "max_probability": 0.8523696660995483
+            }
+          ],
+          "above_threshold_interval_count": 23,
+          "interval_limit": 32,
+          "complete": true
+        }
+      ],
+      "samples": 918400,
+      "peak_pcm16": 21401,
+      "sample_rate": 16000,
+      "frame_samples": 512,
+      "threshold": 0.5,
+      "gain": 1.378029064062427,
+      "detector_identity": {
+        "available": true,
+        "detector": "silero-vad",
+        "version": "6.2.3",
+        "model_sha256": "e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720",
+        "sample_rate": 16000,
+        "frame_samples": 512,
+        "threshold": 0.5,
+        "target_peak": 0.9,
+        "max_gain": 100,
+        "timeout_seconds": 60.0
+      },
+      "elapsed_ms": 521.1717880156357,
+      "task": "MM1.mp3",
+      "chunk_index": 47
+    }
+  ],
+  "long_run_8_hours": {
+    "validated": false
+  },
+  "six_hour_real_input_quality": {
+    "validated": false
+  },
+  "independent_reference_corpus_quality": {
+    "validated": false
+  },
+  "two_tasks_gap_free_acceptance": {
+    "validated": false,
+    "reason": "four audio intervals require listening; sound type unclassified, omitted words not confirmed"
+  }
+}

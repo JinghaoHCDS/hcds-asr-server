@@ -6,13 +6,14 @@ import logging
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any, Protocol, TypeVar
 
 from asr_server.adapters.base import AudioInput, AsrAdapter, TimestampItem, TranscriptionResult, TranscriptionTimings
 from asr_server.errors import AsrError
 from asr_server.observability import emit
 from asr_server.registry import Backend, ModelDefinition, ModelStatus
+from asr_server.workers.transport import ProcessRpcTransport
 
 
 ChunkProgressCallback = Callable[[int, int], Awaitable[None]]
@@ -59,6 +60,9 @@ class ModelRuntime:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     idle_unload_task: asyncio.Task[None] | None = None
+    consecutive_worker_failures: int = 0
+    circuit_until: float = 0.0
+    last_worker_error: str | None = None
 
     def model_summary(self) -> dict[str, object]:
         return {
@@ -101,6 +105,8 @@ class ModelLifecycleManager:
         models: dict[str, ModelDefinition],
         adapter_factory: Callable[[str], AsrAdapter],
         idle_unload_seconds: float = 180.0,
+        circuit_failure_limit: int = 3,
+        circuit_cooldown_seconds: float = 60.0,
     ) -> None:
         self._runtimes = {
             model_id: ModelRuntime(definition=model, adapter=adapter_factory(model_id))
@@ -112,6 +118,53 @@ class ModelLifecycleManager:
         # deployment has one GPU and must never load or run two model workers at
         # the same time without an explicitly validated memory policy.
         self._gpu_operation_lock = asyncio.Lock()
+        self._circuit_failure_limit = circuit_failure_limit
+        self._circuit_cooldown_seconds = circuit_cooldown_seconds
+
+    def inference_readiness(self, model_id: str | None = None) -> dict[str, object]:
+        runtime = self.runtime_for(model_id or self.default_model_id)
+        quarantine = ProcessRpcTransport.quarantine_status()
+        retry_after = max(0.0, runtime.circuit_until - monotonic())
+        reasons = []
+        if quarantine["isolated"]:
+            reasons.append("worker_isolated")
+        if retry_after > 0:
+            reasons.append("worker_circuit_open")
+        return {"ready": not reasons, "reasons": reasons, "retry_after_seconds": retry_after}
+
+    def worker_diagnostics(self) -> dict[str, object]:
+        return {"quarantine": ProcessRpcTransport.quarantine_status(), "models": [
+            {"id": runtime.definition.id, "consecutive_failures": runtime.consecutive_worker_failures,
+             "last_error": runtime.last_worker_error,
+             "retry_after_seconds": max(0.0, runtime.circuit_until - monotonic()),
+             "recovery_probe_available": bool(runtime.circuit_until and runtime.circuit_until <= monotonic())}
+            for runtime in self._runtimes.values()]}
+
+    def assert_inference_available(self, model_id: str | None = None) -> None:
+        ProcessRpcTransport.assert_gpu_safe()
+        state = self.inference_readiness(model_id)
+        if not state["ready"]:
+            raise AsrError(503, "worker_circuit_open", "model worker is cooling down after repeated failures",
+                           {"retryable": True, "retry_after_seconds": state["retry_after_seconds"]})
+
+    def _record_worker_failure(self, runtime: ModelRuntime, error: BaseException) -> None:
+        if not isinstance(error, AsrError) or not error.details.get("worker_fatal"):
+            return
+        runtime.consecutive_worker_failures += 1
+        runtime.last_worker_error = error.code
+        if runtime.consecutive_worker_failures >= self._circuit_failure_limit:
+            runtime.circuit_until = monotonic() + self._circuit_cooldown_seconds
+            emit("worker.circuit_opened", model_id=runtime.definition.id,
+                 failures=runtime.consecutive_worker_failures,
+                 cooldown_seconds=self._circuit_cooldown_seconds)
+
+    def _record_worker_success(self, runtime: ModelRuntime) -> None:
+        if runtime.consecutive_worker_failures:
+            emit("worker.circuit_closed", model_id=runtime.definition.id,
+                 failures=runtime.consecutive_worker_failures)
+        runtime.consecutive_worker_failures = 0
+        runtime.circuit_until = 0.0
+        runtime.last_worker_error = None
 
     @property
     def default_model_id(self) -> str:
@@ -200,6 +253,7 @@ class ModelLifecycleManager:
         resolved_backend = self.resolve_backend(runtime, backend)
         requested_config = LoadConfig(model_id, resolved_backend, device, dtype, runtime.definition.revision)
         async with self._gpu_operation_lock:
+            self.assert_inference_available(runtime.definition.id)
             await self._unload_other_runtimes(runtime)
             async with runtime.request_lock:
                 async with runtime.lock:
@@ -218,7 +272,8 @@ class ModelLifecycleManager:
                     emit("model.loading", model_id=model_id, engine_id=runtime.definition.engine_id, model_revision=runtime.definition.revision)
                     try:
                         await _call_adapter(lambda: runtime.adapter.load(resolved_backend, device, dtype))
-                    except Exception:
+                    except Exception as exc:
+                        self._record_worker_failure(runtime, exc)
                         runtime.status = "error"
                         runtime.rejecting_new_requests = False
                         raise
@@ -425,11 +480,13 @@ class ModelLifecycleManager:
                     f"model is scheduled for unloading: {runtime.definition.id}",
                 )
         async with self._gpu_operation_lock:
+            self.assert_inference_available(runtime.definition.id)
             await self._unload_other_runtimes(runtime)
             async with runtime.request_lock:
                 resolved_backend, load_ms = await self._begin_request(runtime, backend=backend)
                 try:
                     results = await operation(runtime, selected_model_id, resolved_backend)
+                    self._record_worker_success(runtime)
                     runtime.last_used_at = utc_now_iso()
                     timings = TranscriptionTimings(
                         total_ms=(perf_counter() - request_started) * 1000,
@@ -440,6 +497,7 @@ class ModelLifecycleManager:
                     )
                     return resolved_backend, results, timings
                 except AsrError as exc:
+                    self._record_worker_failure(runtime, exc)
                     if exc.details.get("worker_fatal"):
                         async with runtime.lock:
                             runtime.status = "error"
@@ -474,7 +532,7 @@ class ModelLifecycleManager:
             chunk_started = perf_counter()
             audio_input = sequence.audio_for(index)
             try:
-                raw_result = await _retry_inference_once(
+                raw_result = await _run_inference(
                     lambda: _call_adapter(
                         lambda: _adapter_transcribe(
                             runtime.adapter,
@@ -527,7 +585,7 @@ class ModelLifecycleManager:
             if before_chunk is not None:
                 await before_chunk(0, 1)
             chunk_started = perf_counter()
-            result = await _retry_inference_once(
+            result = await _run_inference(
                 lambda: _call_adapter(
                     lambda: _adapter_transcribe(
                         runtime.adapter,
@@ -563,7 +621,7 @@ class ModelLifecycleManager:
             try:
                 if timestamps != "none":
                     batch_results = [
-                        await _retry_inference_once(
+                        await _run_inference(
                             lambda: _call_adapter(
                                 lambda: _adapter_transcribe(
                                     runtime.adapter,
@@ -579,7 +637,7 @@ class ModelLifecycleManager:
                         )
                     ]
                 else:
-                    batch_results = await _retry_inference_once(
+                    batch_results = await _run_inference(
                         lambda: _call_adapter(
                             lambda: _adapter_transcribe_batch(
                                 runtime.adapter,
@@ -652,7 +710,8 @@ class ModelLifecycleManager:
                     await _call_adapter(
                         lambda: runtime.adapter.load(resolved_backend, "cuda", "auto")
                     )
-                except Exception:
+                except Exception as exc:
+                    self._record_worker_failure(runtime, exc)
                     runtime.status = "error"
                     runtime.rejecting_new_requests = False
                     raise
@@ -776,32 +835,17 @@ def _chunked(items: list[AudioInput], batch_size: int) -> list[list[AudioInput]]
     return [items[index : index + batch_size] for index in range(0, len(items), batch_size)]
 
 
-async def _retry_inference_once(operation: Callable[[], Awaitable[T]]) -> T:
-    """Retry one non-fatal inference failure while retaining prior chunk results."""
-
-    try:
-        return await operation()
-    except AsrError as first:
-        if first.code != "inference_failed" or first.details.get("worker_fatal"):
-            raise
-    try:
-        result = await operation()
-    except AsrError as second:
-        second.details["attempts"] = 2
-        raise
-    return _with_retry_warning(result)
+def is_recoverable_worker_error(error: BaseException) -> bool:
+    """One task layer owns retries and must persist its attempt before replay."""
+    return (isinstance(error, AsrError)
+            and error.details.get("worker_reaped") is not False
+            and error.code in {"worker_unavailable", "gpu_unavailable", "inference_failed"})
 
 
-def _with_retry_warning(result: T) -> T:
-    warning = "inference_retry_succeeded:attempt=2"
-    if isinstance(result, TranscriptionResult):
-        return replace(result, warnings=list(dict.fromkeys([*result.warnings, warning])))
-    if isinstance(result, list) and all(isinstance(item, TranscriptionResult) for item in result):
-        return [
-            replace(item, warnings=list(dict.fromkeys([*item.warnings, warning])))
-            for item in result
-        ]  # type: ignore[return-value]
-    return result
+async def _run_inference(operation: Callable[[], Awaitable[T]]) -> T:
+    # No implicit adapter/lifecycle retry: durable workbench recovery records
+    # every replay, including its quality audio cost, before calling again.
+    return await operation()
 
 
 async def _call_adapter(factory: Callable[[], Coroutine[Any, Any, T]]) -> T:

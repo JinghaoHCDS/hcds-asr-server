@@ -252,3 +252,19 @@ small { font-size: 12px; }
 }
 @media (max-height: 720px) and (min-width: 701px) { .page-header { padding: 8px 0 20px; }.topline { height: 44px; }.is-result .topline { height: 36px; }.audio-panel { padding: 10px 16px; }.audio-heading { margin-bottom: 6px; }.result-topbar { margin-bottom: 10px; }.result-grid { margin-top: 12px; }.transcript-help { display: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* Recovery details stay bounded so long gap lists cannot hide the transcript. */
+.gap-panel { flex-shrink: 0; max-height: 23vh; overflow: auto; overscroll-behavior: contain; padding: 12px 16px; margin-top: 12px; }
+.gap-panel .section-heading { margin-bottom: 8px; }
+.gap-panel h3 { font-size: 13px; }
+.gap-panel .muted { font-size: 11px; margin-top: 4px; }
+.gap-panel .issue-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.gap-panel .issue-item { padding: 7px 8px; }
+.partial-export { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-shrink: 0; }
+.partial-export select { max-width: 220px; }
+@media (max-width: 760px) { .gap-panel { max-height: 18vh; padding: 8px 12px; } .gap-panel .section-heading { margin-bottom: 4px; } .partial-export { flex-wrap: wrap; } }
+
+.readiness-reasons { display: block; margin-top: 4px; font-size: 11px; }
+.resilience-metrics { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 20px; }
+.resilience-metrics .stat-row { gap: 12px; }
+.resilience-metrics .stat-row span { overflow-wrap: anywhere; }

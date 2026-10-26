@@ -29,6 +29,15 @@ class Settings:
     worker_startup_timeout_seconds: float = 30.0
     worker_load_timeout_seconds: float = 900.0
     worker_inference_timeout_seconds: float = 3600.0
+    # Phase limits keep the previous envelope until target-machine measurements
+    # justify tighter values. Observation emits diagnostics without termination.
+    worker_chunk_timeout_seconds: float | None = None
+    worker_alignment_timeout_seconds: float | None = None
+    worker_native_timeout_seconds: float | None = None
+    worker_deadline_observation_seconds: float = 300.0
+    worker_circuit_failure_limit: int = 3
+    worker_circuit_cooldown_seconds: float = 60.0
+    gateway_watchdog_seconds: float = 0.0
     worker_shutdown_timeout_seconds: float = 10.0
     job_shutdown_grace_seconds: float = 30.0
     min_free_disk_mb: int = 5120
@@ -120,6 +129,13 @@ def load_settings() -> Settings:
         worker_load_timeout_seconds=worker_load_timeout_seconds,
         worker_inference_timeout_seconds=worker_inference_timeout_seconds,
         worker_shutdown_timeout_seconds=worker_shutdown_timeout_seconds,
+        worker_chunk_timeout_seconds=_positive_float("ASR_WORKER_CHUNK_TIMEOUT_SECONDS", worker_inference_timeout_seconds),
+        worker_alignment_timeout_seconds=_positive_float("ASR_WORKER_ALIGNMENT_TIMEOUT_SECONDS", worker_inference_timeout_seconds),
+        worker_native_timeout_seconds=_positive_float("ASR_WORKER_NATIVE_TIMEOUT_SECONDS", worker_inference_timeout_seconds),
+        worker_deadline_observation_seconds=_positive_float("ASR_WORKER_DEADLINE_OBSERVATION_SECONDS", 300.0),
+        worker_circuit_failure_limit=_positive_int("ASR_WORKER_CIRCUIT_FAILURE_LIMIT", 3),
+        worker_circuit_cooldown_seconds=_positive_float("ASR_WORKER_CIRCUIT_COOLDOWN_SECONDS", 60.0),
+        gateway_watchdog_seconds=_nonnegative_float("ASR_GATEWAY_WATCHDOG_SECONDS", 0.0),
         job_shutdown_grace_seconds=job_shutdown_grace_seconds,
         min_free_disk_mb=min_free_disk_mb,
         max_spool_mb=max_spool_mb,
@@ -157,4 +173,11 @@ def _positive_float(name: str, default: float) -> float:
     value = float(os.getenv(name, str(default)))
     if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be finite and greater than 0")
+    return value
+
+
+def _nonnegative_float(name: str, default: float) -> float:
+    value = float(os.getenv(name, str(default)))
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be finite and non-negative")
     return value

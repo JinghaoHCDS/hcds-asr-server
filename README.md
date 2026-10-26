@@ -323,3 +323,7 @@ ASR_ADAPTER=mock ASR_ENABLE_QWEN_ALIGNMENT=1 \
 继续阅读：[部署与排障](docs/wsl-deployment.md) · [工作台与发布](docs/product-workbench.md) · [API 合约](docs/asr-server-prd.md) · [开发约定](AGENTS.md) · [完整文档](docs/README.md)
 
 模型权重与第三方依赖按各自许可证使用；本仓库尚未声明独立开源许可证。
+
+### 转录异常恢复
+
+工作台保留成功分块，局部缺口后继续处理后续区间，提供标明不完整的 TXT/JSON；仅在全部区间通过后完成任务。空稿可按有依据的语言和有限拆段策略恢复，对齐失败保留原稿。新增 `/readyz`、持久退避、worker 隔离与管理员安全排空。schema 4→5 保留现有数据，无需清空任务。详见 [恢复方案](docs/transcription-resilience-plan.md)和[工作台合约](docs/product-workbench.md#转录恢复与服务就绪)。八小时持续运行、独立参考集准确率及真实六小时质量分别以验收记录为准。

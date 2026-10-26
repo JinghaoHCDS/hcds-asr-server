@@ -6,7 +6,8 @@
 
 - [官方 hcds-lan-asr Skill](../skills/hcds-lan-asr/SKILL.md)：部署后通过 `/skill` 读取同一份 Agent 用法，`/skill/hcds-lan-asr.zip` 下载完整指南及批量客户端；确切接口和运行时能力分别读取 `/openapi.json`、`/v1/models`。
 - [局域网工作台与 Qwen 质量流程](product-workbench.md)：账号、断点上传、七天任务保留、长文搜索与跳转、回听改字及字幕导出。
-- [工作台高质量音频与存储执行方案](workbench-audio-storage-plan.md)：待实施的 192 kbps MP3 保留、临时识别音频回收、容量展示和旧任务清理方案。
+- [工作台高质量音频与存储执行方案](workbench-audio-storage-plan.md)：已完成的 192 kbps MP3 保留、临时识别音频回收、容量展示和旧任务清理；实测范围见对应验收记录。
+- [转录健壮性与高可用专项计划](transcription-resilience-plan.md)：已实现的有界恢复、稀疏进度、局部声音待确认、worker 自愈和就绪检测；专项关闭条件与未验收项见对应记录。
 - [已接入模型的推理实践](asr-model-practices.md)：Qwen 官方 native helpers、音频规范化、生成预算、ForcedAligner 和 MOSS SDPA 的代码与官方来源对照。
 - [Qwen 质量评测](../evaluation/README.md)：开发/验收集、切分候选对照、CER/术语/字幕门槛。
 - [WSL 部署](wsl-deployment.md)：Windows / NVIDIA / WSL 前提、首次 GPU 验收、systemd、Windows 启动与局域网访问。
@@ -19,6 +20,8 @@
 - [性能与多 ASR 改进计划](asr-platform-improvement-plan.md)：资源边界、调试日志、性能、模型接入与测试精简的设计背景；实现行为见[平台运行契约](asr-platform-runtime.md)，检查结果见[平台验收](validation-2026-10-25-platform.md)。[Agent 任务包](asr-platform-agent-tasks.md)保留实施职责记录。
 
 ## 验收记录
+
+- [2026-10-26 转录恢复与服务健壮性](validation-2026-10-26-transcription-resilience.md)：schema 5 保留迁移、真实 worker 故障恢复、两条任务处理到末尾、四处声音待确认及验证边界。
 
 这些是对应版本和环境的历史证据，不代表所有硬件、发行版、模型或音频质量都已验证。
 

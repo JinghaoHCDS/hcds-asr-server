@@ -49,3 +49,10 @@ SQLite 使用 WAL；完整 repository 操作通过有界 executor 在线程内�
 新增设置见 [.env.example](../.env.example)：`ASR_RECEIVE_SLOTS`、`ASR_RECEIVE_TIMEOUT_SECONDS`、`ASR_MULTIPART_METADATA_BYTES`、`ASR_PREPROCESSING_PREFETCH`、`ASR_TEMP_DIR`、`ASR_LOG_LEVEL/FORMAT/DIR`。`ASR_ADAPTER=registered` 是通用注册器入口，旧 `qwen` 配置保持兼容；不会自动启用新生产模型。`.env` 仍仅由部署生成的 systemd unit 读取。
 
 升级先在隔离数据目录验证目标 FFmpeg MP3 编码器和完整真实流程，再关闭新准入，等待活跃操作安全结束并停止服务，使用 `scripts.workbench_release backup` 保存完整数据与配套旧源码/前端。`scripts.workbench_reset_tasks --data-dir ...` 默认只预览数量与字节，加 `--apply` 清除已授权旧任务及其专属文件并重建账本；工具取得离线 service.lock，核对用户、会话及词库身份保持，不触碰模型缓存。安装 schema 4 后核对登录、词库、空任务和容量，再走新样本流程并恢复准入。回滚恢复配套旧源码、前端及迁移前完整数据；旧程序不得直接读取新 schema。临时旧任务备份在本次验收完成后清除并核对空间释放。新版本拒绝未来未知 schema。测试与发布检查入口见[测试去向表](asr-platform-test-map.md)。源码改动不等于线上已切换。
+
+
+## 转录恢复与服务就绪
+
+schema 5 从 schema 4 原位迁移，保留所有现有任务、音频、检查点、正文版本和保留期限。此次升级禁止使用历史 `workbench_reset_tasks`；旧代码拒绝 schema 5，回滚须保存发布后的新增数据并恢复匹配快照。详细恢复协议以[工作台契约](product-workbench.md#转录恢复与服务就绪)为准。
+
+工作台持久 attempt/generation fence、基础设施恢复预算、到期重新排队顺序和独立 recovery_v1.0 质量账本共同约束恢复；所有入口仍共用单 GPU FIFO。`/readyz` 使用调度、维护、数据写入及磁盘余量缓存、worker隔离/熔断和排空状态；读取接口继续可用。管理员排空和恢复统计、阶段deadline、维护监督及systemd设置见同一契约与 [.env.example](../.env.example)。

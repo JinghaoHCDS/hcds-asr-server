@@ -898,3 +898,7 @@ MCP：
 - MOSS-Transcribe-Diarize Hugging Face：https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize
 - MiMo-V2.5-ASR GitHub：https://github.com/XiaomiMiMo/MiMo-V2.5-ASR
 - WSL mirrored networking 已在本机验证，历史验收入口为 `192.168.31.137:18080`，产品运行地址由用户配置
+
+## 转录恢复扩展合约
+
+工作台 schema 5 原位保留 schema 4 数据，增加部分结果、可审计恢复、attempt fencing、持久退避及 `/readyz` 和管理员排空；具体字段、预算与旧任务兼容规则以 [工作台契约](product-workbench.md#转录恢复与服务就绪) 为准。`/v1/**` 仍默认 legacy、同步响应与内存 job，不承诺重启后恢复临时输入。显式 quality_v1 共享独立 recovery_v1.0 策略；MOSS 仅共享通用 worker 故障治理，保留自身生成和说话人策略。

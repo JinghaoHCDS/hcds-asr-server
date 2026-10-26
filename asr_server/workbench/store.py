@@ -17,11 +17,11 @@ from asr_server.workbench.security import password_hash, token_hash
 
 P = ParamSpec("P")
 T = TypeVar("T")
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _summary_sql(payload: str) -> str:
-    fields = ["id", "filename", "status", "created_at", "started_at", "completed_at", "expires_at", "model_revision"]
+    fields = ["id", "filename", "status", "created_at", "started_at", "completed_at", "expires_at", "model_revision", "queued_at", "next_attempt_at", "next_action", "retryability"]
     pairs = [f"'{field}',json_extract({payload},'$.{field}')" for field in fields]
     pairs += [
         f"'model',json_extract({payload},'$.request.model')",
@@ -32,7 +32,11 @@ def _summary_sql(payload: str) -> str:
         f"'alignment_status',json_extract({payload},'$.result.alignment_status')",
         f"'version',json_extract({payload},'$.result.version')",
         "'progress',json_object(" + ",".join(f"'{key}',json_extract({payload},'$.progress.{key}')" for key in
-            ["phase", "percent", "completed_chunks", "total_chunks", "current_chunk"]) + ")",
+            ["phase", "percent", "completed_chunks", "resolved_chunks", "attempted_chunks", "total_chunks", "current_chunk", "gap_count", "next_attempt_at"]) + ")",
+        "'completeness',json_object(" + ",".join(f"'{key}',json_extract({payload},'$.completeness.{key}')" for key in
+            ["complete", "resolved_chunks", "total_chunks", "gap_count", "attempted_chunks"]) + ")",
+        "'recovery',json_object(" + ",".join(f"'{key}',json_extract({payload},'$.recovery.{key}')" for key in
+            ["generation", "infrastructure_retries", "operation_retries", "next_attempt_at", "last_error_code", "retry_order"]) + ")",
         f"'error',CASE WHEN json_type({payload},'$.error')='object' THEN json_object('code',json_extract({payload},'$.error.code'),'message',json_extract({payload},'$.error.message')) ELSE NULL END",
     ]
     return "json_object(" + ",".join(pairs) + ")"
@@ -56,15 +60,38 @@ class WorkbenchStore:
         self.path = root / "workbench.sqlite3"
         self.initialized = False
         self._initialize_lock = threading.RLock()
+        self.storage_error_callback: Callable[[BaseException], None] | None = None
         self.executor = BoundedExecutor(4, 32, "asr-repository", drain_on_cancel=True)
 
     async def run(self, operation: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
         """Run a complete repository operation, including opening its connection."""
-        return await self.executor.run(operation, *args, **kwargs)
+        try:
+            return await self.executor.run(operation, *args, **kwargs)
+        except (sqlite3.Error, OSError) as exc:
+            self._notify_storage_error(exc)
+            raise
+
+    def _notify_storage_error(self, error: BaseException) -> None:
+        # Unique/constraint conflicts are expected business outcomes converted
+        # to AsrError by their caller; they do not mean storage is unavailable.
+        if isinstance(error, sqlite3.IntegrityError) or self.storage_error_callback is None:
+            return
+        if getattr(error, "_workbench_storage_notified", False):
+            return
+        setattr(error, "_workbench_storage_notified", True)
+        try:
+            self.storage_error_callback(error)
+        except Exception:
+            # A diagnostic callback must never replace the original I/O error.
+            pass
 
     def initialize(self) -> None:
-        with self._initialize_lock:
-            self._initialize()
+        try:
+            with self._initialize_lock:
+                self._initialize()
+        except (sqlite3.Error, OSError) as exc:
+            self._notify_storage_error(exc)
+            raise
 
     def _initialize(self) -> None:
         if self.initialized:
@@ -74,7 +101,7 @@ class WorkbenchStore:
             schema = int(db.execute("PRAGMA user_version").fetchone()[0])
             if schema > SCHEMA_VERSION:
                 raise AsrError(409, "schema_version_unavailable", "database requires a newer workbench version")
-            if schema < SCHEMA_VERSION:
+            if schema < 4:
                 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 if any(table in tables and db.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
                        for table in ("jobs", "uploads", "versions", "job_chunks", "legacy_job_payloads", "assets")):
@@ -127,7 +154,7 @@ class WorkbenchStore:
         self.executor.close()
 
     def _migrate(self, db: sqlite3.Connection) -> None:
-        """Upgrade an empty task store while preserving accounts and glossary."""
+        """Upgrade schema 4 in place; older populated audio layouts need their original migration."""
         for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall():
             db.execute(f'DROP TRIGGER "{name}"')
         columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
@@ -186,15 +213,16 @@ class WorkbenchStore:
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
-        self.initialize()
-        db = sqlite3.connect(self.path, timeout=30)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA recursive_triggers=ON")
         try:
-            with db:
-                yield db
-        finally:
-            db.close()
+            self.initialize()
+            with closing(sqlite3.connect(self.path, timeout=30)) as db:
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA recursive_triggers=ON")
+                with db:
+                    yield db
+        except (sqlite3.Error, OSError) as exc:
+            self._notify_storage_error(exc)
+            raise
 
     def create_user(self, username: str, password: str, is_admin: bool = False) -> dict[str, Any]:
         username = username.strip()
@@ -304,6 +332,34 @@ class WorkbenchStore:
         jobs = [{**json.loads(row["summary"]), "revision": row["revision"]} for row in visible]
         return {"jobs": jobs, "next_cursor": visible[-1]["sequence"] if len(rows) > limit else None}
 
+
+    def resilience_summary(self) -> dict[str, Any]:
+        """Bounded aggregate over retained task summaries; never loads transcript bodies."""
+        with self.connection() as db:
+            row = db.execute("SELECT count(*),"
+                             "coalesce(sum(status='failed'),0),"
+                             "coalesce(sum(json_extract(summary,'$.progress.phase')='retry_wait'),0),"
+                             "coalesce(sum(CAST(json_extract(summary,'$.completeness.gap_count') AS INTEGER)),0),"
+                             "coalesce(sum(CAST(json_extract(summary,'$.recovery.infrastructure_retries') AS INTEGER)),0),"
+                             "coalesce(sum(status='completed' AND CAST(json_extract(summary,'$.recovery.infrastructure_retries') AS INTEGER)>0),0),"
+                             "min(CASE WHEN status='queued' THEN coalesce(json_extract(summary,'$.queued_at'),json_extract(summary,'$.created_at')) END) "
+                             "FROM jobs").fetchone()
+            failures = db.execute("SELECT coalesce(json_extract(summary,'$.error.code'),'unknown'),count(*) "
+                                  "FROM jobs WHERE status='failed' GROUP BY 1 ORDER BY 2 DESC,1 LIMIT 51").fetchall()
+        oldest = row[6]
+        age: float | None = None
+        if oldest:
+            try:
+                age = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(str(oldest))).total_seconds())
+            except (ValueError, TypeError):
+                pass
+        return {"window": "retained_tasks", "sampled_at": now(), "tasks": int(row[0]), "failed_tasks": int(row[1]),
+                "retry_wait_tasks": int(row[2]), "quality_gap_count": int(row[3]),
+                "infrastructure_retry_debits": int(row[4]), "infrastructure_recovered_tasks": int(row[5]),
+                "oldest_queued_at": oldest, "oldest_queued_seconds": age,
+                "failure_counts": [{"code": str(item[0]), "tasks": int(item[1])} for item in failures[:50]],
+                "failure_counts_truncated": len(failures) > 50}
+
     def job_revision(self, job_id: str, owner_id: str) -> int:
         with self.connection() as db:
             row = db.execute("SELECT revision FROM jobs WHERE id=? AND owner_id=?", (job_id, owner_id)).fetchone()
@@ -322,7 +378,9 @@ class WorkbenchStore:
     def pending_jobs(self) -> list[str]:
         """Maintenance first selects identifiers; completed result payloads stay on disk."""
         with self.connection() as db:
-            rows = db.execute("SELECT id FROM jobs WHERE status NOT IN ('completed','failed','cancelled') OR json_extract(summary,'$.alignment_status')='pending' ORDER BY sequence").fetchall()
+            rows = db.execute("SELECT id FROM jobs WHERE status NOT IN ('completed','failed','cancelled') OR json_extract(summary,'$.alignment_status')='pending' "
+                              "ORDER BY coalesce(json_extract(payload,'$.queued_at'),json_extract(payload,'$.created_at'),''), "
+                              "coalesce(CAST(json_extract(payload,'$.recovery.retry_order') AS INTEGER),sequence),sequence").fetchall()
         return [str(row[0]) for row in rows]
 
     def job(self, job_id: str, owner_id: str | None = None) -> dict[str, Any]:
@@ -377,8 +435,21 @@ class WorkbenchStore:
         compact["progress"] = progress
         return compact
 
-    def save_job(self, job: dict[str, Any], reserved_bytes: int | None = None) -> None:
+    def save_job(self, job: dict[str, Any], reserved_bytes: int | None = None, *,
+                 attempt_id: str | None = None, generation: int | None = None) -> None:
         with self.connection() as db:
+            if attempt_id is not None or generation is not None:
+                db.execute("BEGIN IMMEDIATE")
+                current = self._require_attempt(db, job["id"], attempt_id, generation)
+                job = {**job, "recovery": current["recovery"]}
+            recovery = job.get("recovery")
+            alignment_pending = (isinstance(recovery, dict) and recovery.get("kind") == "alignment"
+                                 and job["status"] == "completed"
+                                 and (job.get("result") or {}).get("alignment_status") == "pending")
+            if job["status"] in {"completed", "failed", "cancelled"} and isinstance(recovery, dict) and recovery.get("active") and not alignment_pending:
+                # Finalization and its attempt fence are one visible commit;
+                # background cleanup must not change the terminal ETag later.
+                job = {**job, "recovery": {**recovery, "active": False, "finished_at": now()}}
             compact = self._compact(db, job)
             changed = db.execute("UPDATE jobs SET status=?,payload=? WHERE id=?", (job["status"], json.dumps(compact, ensure_ascii=False), job["id"]))
             if changed.rowcount == 0:
@@ -390,24 +461,191 @@ class WorkbenchStore:
                 temporary, text = self.file_categories(sizes)
                 self._set_physical_usage(db, job["id"], job["owner_id"], sum(int(value) for value in sizes.values()), temporary, text)
 
-    def save_version(self, job: dict[str, Any]) -> None:
-        self.save_job(job)
+    def save_version(self, job: dict[str, Any], *, attempt_id: str | None = None,
+                     generation: int | None = None) -> None:
+        self.save_job(job, attempt_id=attempt_id, generation=generation)
 
-    def save_chunk(self, job_id: str, chunk: dict[str, Any], total: int) -> None:
+    def save_chunk(self, job_id: str, chunk: dict[str, Any], total: int, *,
+                   attempt_id: str | None = None, generation: int | None = None) -> None:
         """Publish only after the durable filesystem checkpoint has completed."""
         with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT status,payload FROM jobs WHERE id=?", (job_id,)).fetchone()
             if row is None:
                 raise AsrError(404, "job_not_found", "workbench job not found")
             job = json.loads(row["payload"])
+            if attempt_id is not None or generation is not None:
+                job = self._require_attempt(db, job_id, attempt_id, generation)
             if row["status"] in {"completed", "failed", "cancelled", "cancel_requested"} or job.get("delete_requested") or job.get("cancel_requested"):
                 return
             db.execute("INSERT INTO job_chunks VALUES(?,?,?) ON CONFLICT(job_id,chunk_index) DO UPDATE SET payload=excluded.payload", (job_id, chunk["index"], json.dumps(chunk, ensure_ascii=False)))
-            count = int(db.execute("SELECT count(*) FROM job_chunks WHERE job_id=?", (job_id,)).fetchone()[0])
+            count = int(db.execute("SELECT count(*) FROM job_chunks WHERE job_id=? AND coalesce(json_extract(payload,'$.resolution'),'resolved') IN ('resolved','empty_with_evidence')", (job_id,)).fetchone()[0])
             job["status"] = "transcribing"
             job["progress"] = {**job.get("progress", {}), "phase": "transcribing", "_chunks_ref": True,
-                               "completed_chunks": count, "total_chunks": total, "percent": count / total * 95}
+                               "completed_chunks": count, "resolved_chunks": count, "total_chunks": total, "percent": count / total * 95 if total else 0}
             db.execute("UPDATE jobs SET status=?,payload=? WHERE id=?", (job["status"], json.dumps(job, ensure_ascii=False), job_id))
+
+
+    @staticmethod
+    def _require_attempt(db: sqlite3.Connection, job_id: str, attempt_id: str | None,
+                         generation: int | None, *, allow_terminal: bool = False) -> dict[str, Any]:
+        row = db.execute("SELECT payload,status FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            raise AsrError(404, "job_not_found", "workbench job not found")
+        job = json.loads(row["payload"])
+        recovery = job.get("recovery") or {}
+        if (attempt_id is None or generation is None or recovery.get("attempt_id") != attempt_id
+                or recovery.get("generation") != generation or not recovery.get("active")):
+            raise AsrError(409, "attempt_superseded", "processing attempt is no longer current")
+        if (job.get("cancel_requested") or job.get("delete_requested") or row["status"] in {"cancelled", "cancel_requested"}
+                or (not allow_terminal and row["status"] in {"failed", "completed"} and recovery.get("kind") != "alignment")):
+            raise AsrError(409, "attempt_superseded", "task was cancelled, deleted, or already finalized")
+        current_version = int((job.get("result") or {}).get("version", 0))
+        if not allow_terminal and current_version != int(recovery.get("base_version", 0)):
+            raise AsrError(409, "version_conflict", "transcript changed after processing began")
+        return cast(dict[str, Any], job)
+
+    @staticmethod
+    def _next_submission_order(db: sqlite3.Connection) -> int:
+        row = db.execute("SELECT payload FROM metadata WHERE key='recovery_submission_sequence'").fetchone()
+        sequence = int(row[0]) + 1 if row is not None else 1
+        db.execute("INSERT INTO metadata(key,payload) VALUES('recovery_submission_sequence',?) "
+                   "ON CONFLICT(key) DO UPDATE SET payload=excluded.payload", (str(sequence),))
+        return sequence
+
+    def begin_attempt(self, job_id: str, operation_id: str | None = None, *,
+                      kind: str = "transcription") -> dict[str, Any]:
+        """Fence an execution before its first side effect; resumed retries keep their operation ID."""
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT payload,status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise AsrError(404, "job_not_found", "workbench job not found")
+            job = json.loads(row["payload"])
+            if job.get("delete_requested") or job.get("cancel_requested") or row["status"] in {"cancel_requested", "cancelled"}:
+                raise AsrError(409, "attempt_superseded", "task is cancelled or being deleted")
+            previous = job.get("recovery") or {}
+            continued = operation_id is not None and operation_id == previous.get("operation_id")
+            # A process died before finishing this attempt. Debit recovery before
+            # executing again, so repeated gateway crashes cannot reset limits.
+            if continued and previous.get("active"):
+                if int(previous.get("operation_retries", 0)) >= 1 or int(previous.get("infrastructure_retries", 0)) >= 3:
+                    raise AsrError(503, "infrastructure_retry_exhausted", "interrupted processing exhausted its recovery budget")
+                previous = {**previous,
+                            "infrastructure_retries": int(previous.get("infrastructure_retries", 0)) + 1,
+                            "operation_retries": int(previous.get("operation_retries", 0)) + 1,
+                            "last_error_code": "process_interrupted",
+                            "history": [*(previous.get("history") or []),
+                                {"attempt_id": previous.get("attempt_id"), "generation": previous.get("generation"),
+                                 "error_code": "process_interrupted", "scheduled_at": now()}][-3:]}
+            recovery = {**previous, "attempt_id": identifier("attempt"),
+                        "generation": int(previous.get("generation", 0)) + 1,
+                        "operation_id": operation_id or identifier("operation"), "kind": kind,
+                        "base_version": int((job.get("result") or {}).get("version", 0)),
+                        "active": True, "started_at": now(),
+                        "infrastructure_retries": int(previous.get("infrastructure_retries", 0)),
+                        "operation_retries": int(previous.get("operation_retries", 0)) if continued else 0,
+                        "submission_order": self._next_submission_order(db)}
+            recovery.pop("next_attempt_at", None)
+            job["recovery"] = recovery
+            job.pop("next_attempt_at", None)
+            db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(job, ensure_ascii=False), job_id))
+            return dict(recovery)
+
+    def attempt_is_current(self, job_id: str, attempt_id: str, generation: int) -> bool:
+        with self.connection() as db:
+            try:
+                self._require_attempt(db, job_id, attempt_id, generation)
+            except AsrError as exc:
+                if exc.code in {"job_not_found", "attempt_superseded", "version_conflict"}:
+                    return False
+                raise
+        return True
+
+    def finish_attempt(self, job_id: str, attempt_id: str, generation: int) -> None:
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT payload FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                return
+            job = json.loads(row["payload"])
+            recovery = job.get("recovery") or {}
+            if recovery.get("attempt_id") != attempt_id or recovery.get("generation") != generation or not recovery.get("active"):
+                return
+            job["recovery"] = {**recovery, "active": False, "finished_at": now()}
+            db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(job, ensure_ascii=False), job_id))
+
+    def schedule_infrastructure_retry(self, job_id: str, attempt_id: str, generation: int,
+                                      error: dict[str, Any], delay_seconds: float = 5, *, retention_days: int = 7) -> dict[str, Any]:
+        """Persist debit and backoff together. Scheduling twice cannot grant another retry."""
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            job = self._require_attempt(db, job_id, attempt_id, generation)
+            recovery = dict(job["recovery"])
+            job["error"] = error
+            total = int(recovery.get("infrastructure_retries", 0))
+            operation = int(recovery.get("operation_retries", 0))
+            recovery["active"] = False
+            recovery["last_error_code"] = str(error.get("code", "inference_failed"))
+            if operation >= 1 or total >= 3:
+                job["status"] = "failed"
+                job["retryability"] = {"retryable": total < 3, "reason": "infrastructure_retry_exhausted"}
+                job["next_action"] = "retry" if total < 3 else "listen"
+                job["completed_at"] = now()
+                job["expires_at"] = after_days(retention_days)
+                job["progress"] = {**job.get("progress", {}), "phase": "failed"}
+                job.pop("next_attempt_at", None)
+                recovery.pop("next_attempt_at", None)
+            else:
+                next_attempt = (datetime.now(timezone.utc) + timedelta(seconds=max(0, delay_seconds))).isoformat()
+                recovery.update({"infrastructure_retries": total + 1, "operation_retries": operation + 1,
+                                 "next_attempt_at": next_attempt, "retry_order": self._next_submission_order(db)})
+                history = list(recovery.get("history") or [])
+                history.append({"attempt_id": attempt_id, "generation": generation,
+                                "error_code": recovery["last_error_code"], "scheduled_at": now(),
+                                "next_attempt_at": next_attempt})
+                recovery["history"] = history[-3:]
+                job["status"] = "queued"
+                job["queued_at"] = now()
+                job["next_attempt_at"] = next_attempt
+                job["retryability"] = {"retryable": False, "reason": "automatic_retry_scheduled"}
+                job["next_action"] = "wait"
+                job["progress"] = {**job.get("progress", {}), "phase": "retry_wait", "next_attempt_at": next_attempt}
+            job["recovery"] = recovery
+            db.execute("UPDATE jobs SET status=?,payload=? WHERE id=?", (job["status"], json.dumps(job, ensure_ascii=False), job_id))
+            return job
+
+    def due_retry_jobs(self, at: str | None = None) -> list[str]:
+        with self.connection() as db:
+            rows = db.execute("SELECT id FROM jobs WHERE status='queued' AND "
+                              "json_extract(payload,'$.next_attempt_at') IS NOT NULL AND "
+                              "json_extract(payload,'$.next_attempt_at')<=? AND "
+                              "coalesce(json_extract(payload,'$.cancel_requested'),0)=0 AND "
+                              "coalesce(json_extract(payload,'$.delete_requested'),0)=0 "
+                              "ORDER BY CAST(json_extract(payload,'$.recovery.retry_order') AS INTEGER),sequence", (at or now(),)).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def claim_due_retry(self, job_id: str, at: str | None = None) -> dict[str, Any]:
+        """Make a due retry a fresh durable FIFO submission, even if memory capacity is full."""
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT payload,status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise AsrError(404, "job_not_found", "workbench job not found")
+            job = json.loads(row["payload"])
+            deadline = job.get("next_attempt_at")
+            if row["status"] != "queued" or not deadline or deadline > (at or now()) or job.get("cancel_requested") or job.get("delete_requested"):
+                raise AsrError(409, "job_not_retryable", "automatic retry is not due")
+            job.pop("next_attempt_at", None)
+            job["recovery"].pop("next_attempt_at", None)
+            # Backoff did not reserve a FIFO position. Existing durable queued
+            # work, including work not yet admitted to memory, stays ahead.
+            job["queued_at"] = now()
+            job["recovery"]["retry_order"] = self._next_submission_order(db)
+            job["progress"] = {**job.get("progress", {}), "phase": "queued"}
+            job["progress"].pop("next_attempt_at", None)
+            db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(job, ensure_ascii=False), job_id))
+            return cast(dict[str, Any], job)
 
     def version(self, job_id: str, version: int) -> dict[str, Any]:
         with self.connection() as db:

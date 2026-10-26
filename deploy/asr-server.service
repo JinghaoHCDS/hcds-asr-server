@@ -2,6 +2,8 @@
 Description=WSL ASR Server
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -17,6 +19,7 @@ Environment=ASR_WORKER_LOAD_TIMEOUT_SECONDS=900
 Environment=ASR_WORKER_INFERENCE_TIMEOUT_SECONDS=3600
 Environment=ASR_WORKER_SHUTDOWN_TIMEOUT_SECONDS=10
 Environment=ASR_JOB_SHUTDOWN_GRACE_SECONDS=30
+Environment=ASR_GATEWAY_WATCHDOG_SECONDS=120
 Environment=ASR_MIN_FREE_DISK_MB=5120
 Environment=ASR_MAX_SPOOL_MB=12288
 Environment=ASR_MAX_WORKSPACE_MB=1280
@@ -29,7 +32,7 @@ EnvironmentFile=-"@PROJECT_DIR@/.env"
 ExecStart="@UVICORN@" asr_server.main:app --host @HOST@ --port @PORT@
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=60
+TimeoutStopSec=120
 KillMode=mixed
 
 [Install]

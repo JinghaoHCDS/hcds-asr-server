@@ -122,13 +122,35 @@ _NUMERIC_FIELDS = frozenset({
     "sequence", "worker_pid", "worker_generation", "rpc_request_id", "deadline_seconds", "exit_code",
     "generated_tokens", "prompt_tokens", "max_new_tokens", "sample_rate", "channels", "frames",
     "queue_depth", "dropped_count", "log_queue_dropped_total", "review_budget_seconds", "version",
+    "failures", "cooldown_seconds", "generation", "base_version", "part_index",
+    "start_sample", "end_sample", "resolved_chunks", "attempted_chunks", "gap_count",
+    "infrastructure_retries", "operation_retries", "infrastructure_replays", "retry_after_seconds",
+    "review_audio_seconds", "budget_before_seconds", "budget_after_seconds", "evidence_audio_seconds",
 })
 _ID_FIELDS = frozenset({
     "trace_id", "request_id", "job_id", "model_id", "engine_id", "pipeline_id", "lease_id", "asset_id",
     "reason", "error_code", "error_type", "phase", "operation", "strategy", "requested_strategy",
     "decoder_exit", "normalization_version", "model_revision", "runtime_profile_id", "asset_type",
     "method", "fingerprint", "backend", "dtype", "device", "status", "cancelled", "owner_type",
+    "recovery_policy_version", "attempt_id", "operation_id", "call_key", "recovery_action",
+    "stop_reason", "initial_cause", "language_evidence_method", "base_fingerprint",
 })
+_BOOLEAN_FIELDS = frozenset({"complete", "accepted", "retryable", "worker_fatal", "worker_reaped", "independent_language_truth"})
+_LANGUAGE_NAMES = frozenset(name.casefold() for name in (
+    "auto", "unknown", "Chinese", "English", "Cantonese", "Arabic", "German", "French", "Spanish",
+    "Portuguese", "Indonesian", "Italian", "Korean", "Russian", "Thai", "Vietnamese", "Japanese",
+    "Turkish", "Hindi", "Malay", "Dutch", "Swedish", "Danish", "Finnish", "Polish", "Czech",
+    "Filipino", "Persian", "Greek", "Hungarian", "Macedonian", "Romanian"))
+
+
+def _language_label(value: object) -> str | None:
+    if not isinstance(value, str) or len(value) > 40:
+        return None
+    if value.casefold() in _LANGUAGE_NAMES or re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z]{2,8})?", value):
+        return value
+    return None
+
+
 _CRITICAL_EVENTS = frozenset({"job.queued", "job.started", "job.completed", "job.cancelled", "job.failed", "request.rejected"})
 
 
@@ -169,8 +191,21 @@ def event_record(event: str, *, level: int = logging.INFO, **fields: object) -> 
         "service_instance_id": SERVICE_INSTANCE_ID, "pid": os.getpid(), **context.to_wire(),
     }
     for name, value in fields.items():
-        if name in _NUMERIC_FIELDS and isinstance(value, (int, float)) and math.isfinite(value):
+        if (name in _NUMERIC_FIELDS and isinstance(value, (int, float)) and not isinstance(value, bool)
+                and -10**15 <= value <= 10**15 and math.isfinite(value)):
             record[name] = value
+        elif name in _BOOLEAN_FIELDS and isinstance(value, bool):
+            record[name] = value
+        elif name in {"requested_language", "effective_language"}:
+            if (language := _language_label(value)) is not None:
+                record[name] = language
+        elif name == "next_attempt_at" and isinstance(value, str) and len(value) <= 40:
+            try:
+                moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if moment.tzinfo is not None:
+                    record[name] = moment.astimezone(timezone.utc).isoformat(timespec="seconds")
+            except ValueError:
+                pass
         elif name in _ID_FIELDS:
             if isinstance(value, bool):
                 record[name] = value
@@ -180,6 +215,14 @@ def event_record(event: str, *, level: int = logging.INFO, **fields: object) -> 
             record[name] = value
         elif name == "diagnostics":
             record.update(_diagnostics(value))
+    indices, labels = fields.get("source_chunk_indices"), fields.get("model_language_labels")
+    if isinstance(indices, list) and isinstance(labels, list):
+        pairs = [(index, label) for index, value in zip(indices[:3], labels[:3])
+                 if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < 1_000_000
+                 and (label := _language_label(value)) is not None]
+        if pairs:
+            record["source_chunk_indices"] = [index for index, _ in pairs]
+            record["model_language_labels"] = [label for _, label in pairs]
     return record
 
 

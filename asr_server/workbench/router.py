@@ -39,6 +39,10 @@ class RetryJob(BaseModel):
     from_start: bool = False
 
 
+class DrainRequest(BaseModel):
+    draining: bool
+
+
 class EditSegment(BaseModel):
     text: str = Field(max_length=20000)
     base_version: int = Field(ge=1)
@@ -225,14 +229,18 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
         return await service.edit(user["id"], job_id, segment_id, data.text, data.base_version)
 
     @router.get("/jobs/{job_id}/export")
-    async def export(job_id: str, user: User, format: str = "txt", version: int | None = None) -> Response:
+    async def export(job_id: str, user: User, format: str = "txt", version: int | None = None, partial: bool = False) -> Response:
         task = await service.store.run(service.store.job, job_id, user["id"])
         definition = app.state.manager.runtime_for(task["request"]["model"]).definition
         if format in {"srt", "vtt"} and not (definition.capabilities.forced_alignment or definition.capabilities.segment_timestamps):
             raise AsrError(422, "capability_not_supported", "selected model does not provide subtitle timing")
         if not task.get("result"):
-            raise AsrError(409, "result_not_ready", "task has no complete transcript")
-        result = await service.store.run(service.store.version, job_id, version) if version is not None else task["result"]
+            if not partial or format not in {"txt", "json"} or not task.get("progress", {}).get("text"):
+                raise AsrError(409, "result_not_ready", "task has no saved transcript")
+            result = {"text": task["progress"]["text"], "version": 0, "completeness": {"complete": False},
+                "gaps": task.get("gaps", []), "progress": {k:v for k,v in task["progress"].items() if k not in {"text", "chunks"}}}
+        else:
+            result = await service.store.run(service.store.version, job_id, version) if version is not None else task["result"]
         text, media_type = await service.store.run(export_result, result, format,
             segment_timestamps=definition.capabilities.segment_timestamps)
         filename = quote(f"{task['filename']}.v{result['version']}.{format}")
@@ -286,7 +294,19 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
         return {"storage": {**(await storage_data()), "disk_free_bytes": (await service.store.run(shutil.disk_usage, service.store.root)).free},
                 "queue": queue, "queue_has_more": values["next_cursor"] is not None,
                 "users_count": len(await service.store.run(service.store.users)),
-                "logging": log_stats()}
+                "logging": log_stats(), "inference": app.state.manager.worker_diagnostics(),
+                "readiness": service.readiness(), "draining": service.draining,
+                "maintenance_failures": service.maintenance_failures,
+                "resilience": await service.store.run(service.store.resilience_summary)}
+
+    @router.post("/admin/drain")
+    async def drain(data: DrainRequest, _user: Admin) -> dict[str, Any]:
+        app.state.job_manager.scheduler.set_draining(data.draining)
+        service.set_draining(data.draining)
+        if not data.draining:
+            await service.fill_queue()
+        return {"draining": service.draining, "active_operations": len(service.active),
+            "playback_consumers": sum(service.playback_consumers.values()), "readiness": service.readiness()}
 
     app.include_router(router)
     return service

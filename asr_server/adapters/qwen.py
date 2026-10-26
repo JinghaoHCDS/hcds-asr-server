@@ -366,7 +366,7 @@ class _QwenWorkerBackend:
                 text=text,
                 duration=audio_duration_seconds(audio),
                 language=detected_language,
-                warnings=[*self._result_warnings(first), *alignment_warnings],
+                warnings=[*self._result_warnings(first), *alignment_warnings, *(["language_label_missing"] if language == "auto" and not self._result_language(first) else [])],
                 timestamps=timestamp_items,
                 timings=TranscriptionTimings(
                     inference_ms=inference_ms,
@@ -435,7 +435,7 @@ class _QwenWorkerBackend:
                     text=self._non_empty_text(result),
                     duration=audio_duration_seconds(audio),
                     language=self._result_language(result) or ("zh" if language == "auto" else language),
-                    warnings=self._result_warnings(result),
+                    warnings=[*self._result_warnings(result), *(["language_label_missing"] if language == "auto" and not self._result_language(result) else [])],
                     generation=self._result_generation(result),
                     context=ContextApplication(
                         requested=bool(context),
