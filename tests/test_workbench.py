@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -50,6 +51,13 @@ async def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIte
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, output)
         return NormalizedAudioPath(output, 0)
+    async def retained(source: Path, output: Path, **kwargs: Any) -> dict[str, Any]:
+        shutil.copyfile(source, output)
+        return {"state": "ready", "path": "audio.mp3", "sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+                "size_bytes": output.stat().st_size, "duration_seconds": 2., "sample_rate": 48000, "channels": 1,
+                "codec": "mp3", "bitrate_bps": 192000, "version": "test", "decoder": "test"}
+    monkeypatch.setattr(service_module, "prepare_retained_audio", retained)
+    monkeypatch.setattr(service_module, "validate_retained_audio", lambda *_args: None)
     async def probe(*args: Any, **kwargs: Any) -> float:
         return 2.0
     async def run(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -295,7 +303,7 @@ async def test_prefetch_cancel_releases_preparation_and_preserves_fifo(workbench
     await asyncio.wait_for(prepare_entered.wait(), 2)
     cancelled = await client.post(f"/api/jobs/{second}/cancel")
     assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
-    assert (service.job_dir(second) / "source").exists()
+    assert (service.job_dir(second) / "audio.mp3").exists()
     assert not (service.job_dir(second) / "audio.partial.wav").exists()
     assert app.state.workspace_manager._reserved_upload_bytes == 0
     third = await submit(client, key="prefetch-third")
@@ -397,7 +405,7 @@ async def test_delete_waits_for_active_alignment_without_resurrection(workbench:
     assert response.status_code == 200
     await asyncio.wait_for(entered.wait(), 1)
     assert (await client.delete(f"/api/jobs/{job_id}")).status_code == 202
-    assert (service.job_dir(job_id) / "audio.wav").exists()
+    assert (service.job_dir(job_id) / "audio.mp3").exists()
     release.set()
     for _ in range(100):
         if (await client.get(f"/api/jobs/{job_id}")).status_code == 404:

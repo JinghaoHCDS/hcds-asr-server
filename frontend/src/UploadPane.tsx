@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { ApiError, api, bytes, message, type Capabilities, type Job, type Upload, type User } from './api';
+import { ApiError, api, bytes, message, type Capabilities, type Job, type StorageUsage, type Upload, type User } from './api';
 import { Icon } from './icons';
 import { StorageMeter } from './App';
 
@@ -10,7 +10,7 @@ const ALLOWED = /\.(wav|mp3|m4a|aac|flac|ogg|opus|aiff|aif|wma|mp4|mov|mkv|webm|
 const rowKey = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 function readSaved(key: string): SavedUpload[] { try { const values: unknown = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(values) ? values.filter((v): v is SavedUpload => !!v && typeof v.id === 'string' && typeof v.hash === 'string' && typeof v.filename === 'string' && Number.isFinite(v.size)) : []; } catch { return []; } }
 
-export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { user: User; caps: Capabilities | null; onSubmitted: () => void; onOpenJobs: () => void }) {
+export default function UploadPane({ user, caps, storage, onStorageChanged, onSubmitted, onOpenJobs }: { user: User; caps: Capabilities | null; storage: StorageUsage | null; onStorageChanged: () => void; onSubmitted: () => void; onOpenJobs: () => void }) {
   const storageKey = `asr.uploads.${user.id}`;
   const [saved, setSaved] = useState(() => readSaved(storageKey));
   const [rows, setRows] = useState<UploadRow[]>([]);
@@ -49,7 +49,7 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
   function drop(e: DragEvent) { e.preventDefault(); setDrag(false); if (!busy) addFiles(e.dataTransfer.files); }
   async function removeUpload(record: SavedUpload) {
     setError('');
-    try { await api(`/uploads/${record.id}`, { method: 'DELETE' }); persist(savedRef.current.filter(v => v.id !== record.id)); }
+    try { await api(`/uploads/${record.id}`, { method: 'DELETE' }); persist(savedRef.current.filter(v => v.id !== record.id)); onStorageChanged(); }
     catch (e) { if (e instanceof ApiError && e.status === 404) persist(savedRef.current.filter(v => v.id !== record.id)); else setError(message(e)); }
   }
 
@@ -79,6 +79,7 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
     if (previous) record = previous;
     else {
       upload = await api<Upload>('/uploads', { method: 'POST', body: JSON.stringify({ filename: row.file.name, size_bytes: row.file.size }) });
+      onStorageChanged();
       record = { id: upload.id, filename: row.file.name, size: row.file.size, lastModified: row.file.lastModified, hash };
       persist([...savedRef.current, record]);
     }
@@ -93,6 +94,7 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
       const currentOffset = upload!.offset;
       const body = await row.file.slice(currentOffset, Math.min(currentOffset + upload!.chunk_size, row.file.size)).arrayBuffer();
       upload = await api<Upload>(`/uploads/${upload!.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/octet-stream', 'Upload-Offset': String(currentOffset) }, body });
+      onStorageChanged();
       if (upload.offset <= currentOffset || upload.offset > row.file.size) throw new Error('服务器返回了异常的上传位置，请重新选择文件恢复上传');
     }
     if (abort.current) throw new Error('上传已暂停，重新选择相同文件可继续');
@@ -112,7 +114,7 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
         if (abort.current) break;
         try { await transfer(row); } catch (e) { update(row.key, { state: '待继续', error: message(e) }); }
       }
-    } finally { setBusy(false); }
+    } finally { setBusy(false); onStorageChanged(); }
   }
 
   const count = rows.filter(v => !v.job).length;
@@ -120,6 +122,7 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
     <section className="panel upload-panel"><div className="panel-heading"><div className="step-number">01</div><div><h2>添加你的素材</h2><p>音频或视频，都从这里开始。</p></div><span className="badge">多文件排队</span></div>
       <input ref={picker} type="file" multiple accept="audio/*,video/*,.mkv,.flac,.m4a,.opus" className="visually-hidden" disabled={busy} onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }} />
       <button type="button" className={`drop-zone ${drag ? 'dragging' : ''}`} disabled={busy} onClick={() => picker.current?.click()} onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={drop}><span className="upload-symbol"><Icon name="upload" size={28} /></span><strong>把音频或视频拖到这里</strong><span>或 <u>选择本地文件</u></span><small>MP3、WAV、M4A、MP4、MOV 等常见格式<br />最长 {caps ? Math.floor(caps.max_duration_seconds / 3600) : 6} 小时 · 单文件最高 {bytes(caps?.max_upload_bytes ?? 8 * 1024 ** 3)}</small></button>
+      <p className="footnote upload-audio-policy">素材将保存为高质量 MP3，原始音视频在转换完成后删除；任务结束后保留 {caps?.retention_days ?? 7} 天。</p>
       {error && <p className="inline-error" role="alert">{error}</p>}
       {rows.length > 0 && <div className="upload-files">{rows.map(row => <div className="upload-file" key={row.key}><Icon name={row.job ? 'check' : 'file'} size={20} /><div><strong title={row.file.name}>{row.file.name}</strong><span>{bytes(row.file.size)} · {row.state}{['校验文件', '上传中'].includes(row.state) ? ` ${Math.floor(row.percent)}%` : ''}</span>{['校验文件', '上传中'].includes(row.state) && <div className="progress-track"><i style={{ width: `${row.percent}%` }} /></div>}{row.error && <span className="inline-error">{row.error}</span>}</div>{!busy && <button className="icon-button" aria-label={`移除 ${row.file.name}`} onClick={() => setRows(old => old.filter(v => v.key !== row.key))}><Icon name="close" size={16} /></button>}</div>)}</div>}
       {saved.length > 0 && <div className="resume-note"><Icon name="refresh" size={18} /><div><strong>{saved.length} 个上传可以继续</strong><p>重新选择下列原文件，校验后从服务器保存的位置继续。继续前请确认本页的领域和热词。</p>{saved.map(s => <div className="resume-file" key={s.id}><span>{s.filename} · {bytes(s.size)}</span><button className="text-link" disabled={busy} onClick={() => void removeUpload(s)}>取消上传并删除</button></div>)}</div></div>}
@@ -136,5 +139,5 @@ export default function UploadPane({ user, caps, onSubmitted, onOpenJobs }: { us
       {selectedProfile === 'quality_v1' && caps?.quality_profiles.some(p => p.id === 'quality_v1' && p.validated === false) && <p className="footnote">当前转录流程处于试运行阶段，正在进行真实长音频验收。可通过结果页回听、校对后交付。</p>}
       {rows.some(v => v.job) && <button className="text-link uploaded-link" onClick={onOpenJobs}>前往我的任务，查看处理进度 <Icon name="arrow" size={15} /></button>}
     </section>
-  </div><aside className="upload-aside"><div className="guide-card"><div className="eyebrow">A QUIETER WORKFLOW</div><h3>从声音到成稿，<br />少一点来回。</h3><div className="guide-step"><b>1</b><div><strong>上传后，即可离开</strong><p>文件上传完成后，任务会在服务器继续处理。</p></div></div><div className="guide-step"><b>2</b><div><strong>完整转录，局部复核</strong><p>系统自动处理长音频，并检查需要复核的片段。</p></div></div><div className="guide-step"><b>3</b><div><strong>回听校对，导出交付</strong><p>点击文字回到原音，保留修改记录和字幕版本。</p></div></div><div className="retention-note"><Icon name="headphones" size={18} /><span>任务完成后保留 {caps?.retention_days ?? 7} 天<br /><small>可随时手动删除</small></span></div></div>{caps?.storage && <StorageMeter used={caps.storage.used_bytes} quota={caps.storage.quota_bytes} />}</aside></div>;
+  </div><aside className="upload-aside"><div className="guide-card"><div className="eyebrow">A QUIETER WORKFLOW</div><h3>从声音到成稿，<br />少一点来回。</h3><div className="guide-step"><b>1</b><div><strong>上传后，即可离开</strong><p>文件上传完成后，任务会在服务器继续处理。</p></div></div><div className="guide-step"><b>2</b><div><strong>完整转录，局部复核</strong><p>系统自动处理长音频，并检查需要复核的片段。</p></div></div><div className="guide-step"><b>3</b><div><strong>回听校对，导出交付</strong><p>点击文字回到回听音频，保留修改记录和字幕版本。</p></div></div><div className="retention-note"><Icon name="headphones" size={18} /><span>任务结束后保留 {caps?.retention_days ?? 7} 天<br /><small>可随时手动删除</small></span></div></div>{storage ? <StorageMeter storage={storage} /> : <p className="footnote">正在读取容量…</p>}</aside></div>;
 }

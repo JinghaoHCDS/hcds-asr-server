@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import re
 import tomllib
@@ -13,6 +14,7 @@ from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 from asr_server.registry import ALIGNER_SOURCE, MODEL_SOURCES
+from asr_server.errors import AsrError
 
 
 def check_release_dependencies(root: Path) -> dict[str, Any]:
@@ -54,10 +56,14 @@ def check_release_dependencies(root: Path) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--media", action="store_true", help="also verify FFmpeg MP3 encoder and tool identities")
     arguments = parser.parse_args()
     try:
         result = check_release_dependencies(arguments.root)
-    except (ValueError, KeyError, OSError) as error:
+        if arguments.media:
+            from asr_server.audio.retained import check_mp3_encoder
+            result["media"] = asyncio.run(check_mp3_encoder())
+    except (ValueError, KeyError, OSError, AsrError) as error:
         parser.exit(1, f"release dependency check failed: {error}\n")
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 

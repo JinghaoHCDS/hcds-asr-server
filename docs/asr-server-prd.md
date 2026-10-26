@@ -1,5 +1,7 @@
 # HCDS ASR Server PRD
 
+2026-10-26 工作台音频扩展：`/api/**` 使用 schema 4，持久保存经过完整校验的 192 kbps CBR MP3，原始上传在 ready 元数据提交后删除；识别与编辑对齐 PCM 只在操作期间存在，清理后才发布终态。播放返回 `audio/mpeg` 并支持 Range；个人容量由 `GET /api/storage` 的分类账本提供。升级通过离线工具清除旧任务及其文件，保留账户与公共词库，不提供旧 WAV/检查点迁移分支。检查点绑定 MP3/PCM 与解码身份，不匹配时明确拒绝复用，支持显式从头重试。完整契约见[工作台文档](product-workbench.md)和[平台运行契约](asr-platform-runtime.md)。本扩展不改变旧 `/v1/**`、官方客户端 Skill、模型能力或质量参数；实机与音质验收以对应记录为准。
+
 2026-10-25 Agent Skill 扩展：官方 `hcds-lan-asr` 来源为 `skills/hcds-lan-asr/`。
 `GET /skill` 公开返回同源 Markdown 指南并注入部署地址，`GET /skill/hcds-lan-asr.zip`
 公开下载指南、客户端及自动生成的 `server.json`，`GET /skill/asr_batch.py` 返回客户端源文件。
@@ -10,7 +12,7 @@
 
 2026-10-25 平台实现扩展：解析前资源准入、统一同步/异步推理 FIFO、一次归一化资产、schema 3 摘要分页与正文分离、关联日志及显式引擎注册，以[平台运行契约](asr-platform-runtime.md)为准。真实 GPU 与质量验收状态见对应验收记录。
 
-更新时间：2026-10-22
+更新时间：2026-10-26
 
 2026-10 产品化扩展：新增同端口局域网工作台、个人账号、SQLite 持久任务、7 天音频及结果保留、断点上传与分块检查点、公共词库和 `quality_v1`。完整新增合约见 [工作台与质量流程](product-workbench.md)，该合约覆盖后文历史“暂不做 Web 管理后台 / 不引入数据库”的范围说明。旧 `/v1/**` 默认 `quality_profile=legacy` 并继续原内存任务及 Bearer 语义；网页 `/api/**` 使用个人 Cookie 会话。新流程和 6 小时质量必须通过真实评测后才能宣布已验收。
 

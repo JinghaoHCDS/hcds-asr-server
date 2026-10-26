@@ -1,5 +1,7 @@
 # 局域网工作台与 Qwen quality_v1
 
+2026-10-26 音频与存储扩展：工作台使用 schema 4 和持久 192 kbps CBR MP3，识别及对齐 PCM 在操作退出后清理。该扩展覆盖此前持久 WAV 与旧任务自动迁移行为；旧 `/v1/**`、官方客户端 Skill、质量参数与模型能力保持原契约。产品决策及验收清单见[实施方案](workbench-audio-storage-plan.md)。
+
 2026-10-25 平台实现扩展：解析前资源准入、统一同步/异步推理 FIFO、一次归一化资产、schema 3 摘要分页与正文分离、关联日志及显式引擎注册，以[平台运行契约](asr-platform-runtime.md)为准。真实 GPU 与质量验收状态见对应验收记录。
 
 批准日期：2026-10-22。本文是 `docs/asr-server-prd.md` 的产品化扩展，覆盖旧版“不做 Web UI / 不引入数据库”的阶段性边界。
@@ -16,7 +18,7 @@
 
 ## 质量流程
 
-1. 统一原音格式并保留绝对时间轴，视频只保留提取出的可回听音轨。
+1. 选择首条音轨，生成或严格校验复用标准 MP3，保留有效时间轴；识别时从同一 MP3 创建临时 PCM，视频原文件在音频提交 ready 后删除。
 2. 完整覆盖切分，在目标附近寻找低能量切点，不因检测到静音就丢弃输入。候选目标 30/60/90/120/180 秒，比较零重叠和边界两侧上下文，单次输入不超过 180 秒。
 3. 每块使用任务冻结的词库快照；默认不传播上一块全文。自动生成预算 4096，EOS 提前结束；显式限制保持原值。
 4. 截断、疑似循环、空白语音区、边界冲突及疑似术语问题有界复核：最多两轮，总复核音频预算不超过首次输入时长的 30%。未完成区间不得静默变成 completed。
@@ -25,7 +27,7 @@
 
 `quality_v1.2` 修复空稿区间判断：每个区间及复核子区间仍先运行 ASR，纯零 PCM 可以交付空文本；只在源音频尾部，且 PCM16 峰值不超过 4、非零采样比例不超过 5%、末尾全零至少持续 1 秒及该区间的一半时，允许把空结果作为近数字静音尾段交付。后者必须保留 `near_silent_tail` 待复核标记及采样证据。常量非零低音量、更强瞬时信号和非尾部输入不通过该豁免；这不是通用语音检测，也不据此跳过低能量音频。
 
-流程版本参与检查点指纹。升级后不得拼接旧流程结果；旧检查点版本不匹配时明确拒绝恢复，重新运行需保留原失败记录并从原音开始。
+流程版本参与检查点指纹。升级后不得拼接旧流程结果；检查点版本不匹配时明确拒绝恢复，用户可显式从头重试，以保留的标准 MP3 重新处理。
 
 `quality_v1.3` 修复 Qwen 显式语言输入：仍由原生 `apply_transcription_request` 处理语言代码与音频，仅为该请求提供能保留 assistant 语言前缀的兼容模板，不修改模型缓存。自动检测路径不变；生成正文没有语言标签时，按请求语言进行后续对齐，不将空语言转换为字符串 `None`。
 
@@ -41,11 +43,17 @@
 
 上传块大小 8 MiB，服务端顺序确认 offset；断线后查询已接收 offset，用户重选同一文件后续传。提交使用幂等键，重复提交不产生重复任务。浏览器关闭后任务继续。
 
-每个有效分块原子保存检查点，包含原音指纹、模型 revision、流程版本、词库和参数。重启恢复队列顺序；未结束模型调用重做，已完成分块可复用。版本不一致时拒绝混用，明确要求重新运行。
+每个有效分块原子保存检查点，包含标准 MP3 摘要、解码规范、PCM 摘要、模型 revision、流程版本、词库和参数。重启恢复队列顺序；未结束模型调用重做，已完成分块仅在重建 PCM 身份一致时复用。临时文件路径及 inode 不作跨操作稳定身份；版本不一致返回 `checkpoint_version_mismatch` 或 `resume_version_unavailable`，通过 `POST /api/jobs/{id}/retry` 的 `{ "from_start": true }` 清除旧进度并从头处理。
+
+持久音频为 `audio.mp3`，界面显示“高质量回听 · MP3 192 kbps”。源采样率为 44.1/48 kHz 时保持，其余转为 48 kHz；单/双声道保持，多声道使用固定规则混为双声道。保存实际音轨索引、有效时长、编码规格、实际大小、SHA256、时间轴及工具身份；多音轨素材提示所用首条音轨。此处理不额外降噪、响度归一化、增强增益或裁剪静音，不恢复低质源已丢失的细节。
+
+MP3 必须完整解码并通过帧、规格、尾部与有效时长校验；符合标准的 MP3 可直接复用，判断不能只依赖扩展名或平均码率。标准文件经 partial 原子提交并持久化 `audio_asset.state=ready` 后才删除唯一 source；转换失败或取消尚未 ready 时保留 source，重试重新准备。ready 后失败或取消仍保留 MP3 和有效检查点。首次转录、重试、自动复核及初始字幕对齐共用一次操作内的 PCM；编辑对齐独立预留空间，完整受控解码后按整数采样窗口取段，不做 MP3 随机截取。操作结束清理 PCM、分片、partial 和 lease 后才发布终态，下一次操作按需重建，MP3 不重复编码。启动恢复检查 ready 文件身份并回收无 owner 临时文件。
 
 默认容量：单个上传 8 GiB、每用户保留区 16 GiB、全局 64 GiB、磁盘余量 5 GiB、最长六小时。限制均可配置。到达容量限制拒绝新上传，不删除未到期任务来凑空间。已完成/失败/取消任务在终态七天后清理，可提前删除。未提交上传也需要过期回收，避免永久占用配额。
 
-保留数据与推理临时目录分离；临时分片和预处理副本用后删除。主动取消等待模型安全边界，不强杀当前推理。删除包括音频、检查点、规范稿、原稿和全部编辑版本，不能让晚到的模型结果复活已删除任务。
+容量账本分为 `saved_bytes`（保留文件）、`text_bytes`（文字与版本）、`temporary_bytes`（已落盘临时占用）和 `reserved_bytes`（未兑现预留）；`used_bytes` 为前三者之和，`allocated_bytes` 再加未兑现预留，可分配余量为配额减 allocated。分类互斥，不能把已落盘预留再次计费。转换峰值计入 source、MP3 及操作 PCM，192 kbps 仅用于估算，边界由实际字节及帧数检查；删除失败不得提前结算释放。轮询直接查账本，不扫描文件目录。管理端物理磁盘余量单独展示。上传、提交、终态、取消、对齐完成、删除和页面重新可见时刷新轻量统计。
+
+保留数据与推理临时目录分离；临时分片和预处理副本用后删除。主动取消等待模型安全边界，不强杀当前推理。删除等待活跃消费者安全退出，再清音频、检查点、规范稿、原稿和全部编辑版本，不能让晚到的模型结果复活已删除任务。
 
 文本按片段修改，携带 `base_version` 做乐观锁。只重新对齐受影响片段，新版本对齐未完成时禁止导出新 SRT/VTT；可回到已完成的旧版本导出。编辑不隐式改变公共词库。
 
@@ -54,7 +62,9 @@
 - `/v1/audio/transcriptions`、`/v1/audio/transcription-jobs` 增加可选 `quality_profile=legacy|quality_v1`，默认 legacy；MOSS 不接受 Qwen 专属 profile。
 - `/api/auth/me|login|logout`：个人会话；`/api/capabilities`：启用模型、质量流程、领域、输入及保留限制。
 - `/api/uploads`：创建；`GET/PATCH /api/uploads/{id}`：查询/顺序续传，PATCH 用 `Upload-Offset`；`POST /api/uploads/{id}/complete`：冻结参数并提交任务。
-- `/api/jobs`：个人列表；`/api/jobs/{id}`：查询/删除；`POST .../cancel|retry`：取消/重试；`GET .../audio`：带归属校验的 Range 音频。
+- `/api/jobs`：个人列表及音频实际大小；`/api/jobs/{id}`：查询/删除，详情包含 `audio_asset` 准备状态与编码规格；`POST .../cancel|retry`：取消/重试，retry 可传 `{ "from_start": true }`。
+- `GET /api/jobs/{id}/audio`：ready 后返回 `audio/mpeg`，支持 Range、归属隔离及私有缓存；准备中返回 `409 audio_not_ready`，不回退到 source 或临时 PCM。
+- `GET /api/storage`：个人分类占用、配额和剩余可分配量，不查询模型能力；管理端 `/api/admin/status.storage` 返回全局分类与物理磁盘余量。
 - `PATCH /api/jobs/{id}/segments/{segment_id}`：带版本的改字；`GET .../export?format=txt|srt|vtt|json&version=N`：指定版本导出。
 - `/api/admin/users`、`/api/admin/users/{id}`：账户；`/api/admin/glossary`：词库；`/api/admin/status`：队列与容量。
 
@@ -91,7 +101,11 @@ uv run uvicorn asr_server.main:app --host 0.0.0.0 --port 18080
 
 先运行 mock 回归、类型检查、前端构建、真实浏览器流程，再在 WSL 独立代码目录和数据目录完成 CUDA、Qwen backend smoke、1.7B+ForcedAligner及完整工作台验收。线上服务不在测试过程中被替换。
 
-切换前核对线上与本地文件差异、等待活跃任务结束，停止写入后使用 SQLite backup API 生成一致备份，保存旧源码和依赖记录。回滚必须同时恢复匹配版本的代码、静态产物和数据库；不能让旧代码读取未知新 schema。新流程失败时旧 API 默认值仍保持 legacy。真实质量门槛见 [评测说明](../evaluation/README.md)。
+切换前核对线上与本地文件差异，检查目标 FFmpeg 提供 MP3 编码器；在隔离代码与数据目录验证编码、真实转录、PCM 清理后回听及编辑对齐。进入维护窗口后关闭新上传和任务准入，等待活跃操作安全结束、停止服务，使用 SQLite backup API 保存一致数据备份及配套旧源码、前端和依赖记录。
+
+schema 4 不迁移旧工作台任务。离线清理工具先列出任务、上传和文件数量及大小，执行后清除旧任务、关联与未提交上传、版本、chunk、检查点、legacy payload、音频及工作台专属临时文件并重建账本；账户、密码哈希和公共词库及版本保持。禁止清模型缓存或其他服务文件。旧 schema 存在任务/上传时启动拒绝并返回 `schema_reset_required`；清空后可升级。发布后确认登录、词库、空任务列表及容量，再完成新样本端到端验收后恢复准入。
+
+回滚必须同时恢复匹配旧代码、静态产物和迁移前完整数据，不能让旧程序读取 schema 4。旧任务清除授权只作用于在线任务，发布备份保留至验收完成；完成后清除本次临时备份中的旧任务数据并核对磁盘释放。新流程失败时旧 API 默认值仍保持 legacy。真实质量门槛见 [评测说明](../evaluation/README.md)，未试听不记为音质已验收。
 
 ### 发布包与离线数据备份命令
 
@@ -100,6 +114,9 @@ uv run uvicorn asr_server.main:app --host 0.0.0.0 --port 18080
 uv run python -m scripts.workbench_release bundle --output /path/to/new-release.tar.gz
 # 停止使用该data-dir的服务后备份；若仍持有service.lock则拒绝操作
 uv run python -m scripts.workbench_release backup --data-dir /path/to/data/workbench --output /path/to/new-backup
+# schema 4 升级：同样要求服务停止；默认只预览，确认本次清除范围后执行 --apply
+uv run python -m scripts.workbench_reset_tasks --data-dir /path/to/data/workbench
+uv run python -m scripts.workbench_reset_tasks --data-dir /path/to/data/workbench --apply
 # 恢复到新目录或空目录；逐文件校验、SQLite integrity_check，并报告源码匹配状态
 uv run python -m scripts.workbench_release restore --backup /path/to/new-backup --data-dir /path/to/restored-workbench
 ```

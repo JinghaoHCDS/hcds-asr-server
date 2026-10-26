@@ -19,20 +19,15 @@ from asr_server.workbench.security import LoginFailures
 from asr_server.workbench.store import SCHEMA_VERSION, WorkbenchStore
 
 
-def test_legacy_migration_summary_paging_and_capacity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_schema4_summary_paging_and_capacity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     payload = {"id": "old", "owner_id": "alice", "filename": "sample.wav", "status": "completed",
                "request": {"model": "test", "hotwords": "private"}, "progress": {"phase": "completed", "text": "private"},
                "result": {"text": "private" * 10000, "version": 1, "alignment_status": "aligned"}}
-    encoded = json.dumps(payload)
-    with sqlite3.connect(tmp_path / "workbench.sqlite3") as db:
-        db.execute("CREATE TABLE jobs(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE,owner_id TEXT,status TEXT,reserved_bytes INTEGER,payload TEXT,idempotency_key TEXT,fingerprint TEXT,UNIQUE(owner_id,idempotency_key))")
-        db.execute("INSERT INTO jobs(id,owner_id,status,reserved_bytes,payload) VALUES(?,?,?,?,?)", ("old", "alice", "completed", 100, encoded))
     store = WorkbenchStore(tmp_path)
     store.initialize()
     with store.connection() as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-        assert db.execute("SELECT payload FROM legacy_job_payloads WHERE job_id='old'").fetchone()[0] == encoded
-        assert "private" * 100 not in db.execute("SELECT payload FROM jobs WHERE id='old'").fetchone()[0]
+        db.execute("INSERT INTO jobs(id,owner_id,status,reserved_bytes,payload) VALUES(?,?,?,?,?)", ("old", "alice", "completed", 100, json.dumps(payload)))
         for job_id, owner in [("new", "alice"), ("other", "bob")]:
             task = {**payload, "id": job_id, "owner_id": owner}
             db.execute("INSERT INTO jobs(id,owner_id,status,reserved_bytes,payload) VALUES(?,?,?,?,?)", (job_id, owner, "completed", 100, json.dumps(task)))
@@ -71,6 +66,8 @@ def test_legacy_migration_summary_paging_and_capacity(tmp_path: Path, monkeypatc
     monkeypatch.setattr(store, "connection", original)
     with store.connection() as db:
         db.execute("DELETE FROM jobs")
+    assert store.usage() == 90  # An unrelated physical asset still occupies storage.
+    store.set_physical_usage("asset", "bob", 0)
     assert store.usage() == 0
     store.close()
 
@@ -171,3 +168,50 @@ async def test_shared_disk_promises_handoff_and_materialization(tmp_path: Path, 
     assert not manager._persistent_handoffs[device] and manager._reserved_upload_bytes == 0
     available = await manager.reserve_resource(150, tmp_path)
     await available.release()
+
+
+@pytest.mark.parametrize("spare_reservation", [0, 100])
+async def test_handoff_grows_after_materialized_pcm_and_ledger_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spare_reservation: int,
+) -> None:
+    free = [1000]
+    monkeypatch.setattr("asr_server.audio.workspace.shutil.disk_usage", lambda _path: SimpleNamespace(free=free[0]))
+    manager = WorkspaceManager(Settings(min_free_disk_mb=0))
+    initial = 200 + spare_reservation
+    await manager.set_persistent_reservations(tmp_path, {"job": initial})
+    decoder = await manager.handoff_persistent(tmp_path, "job", 200)
+    await decoder.materialize(150)
+    free[0] -= 150
+    await manager.set_persistent_reservations(tmp_path, {"job": initial - 150}, check_growth=False)
+    assert manager.pending_disk_bytes(tmp_path) == initial - 150
+
+    # A low duration estimate needs another 100 bytes. This can use either a
+    # pre-existing spare reservation or a fresh admission after earlier writes.
+    admitted = 100 - spare_reservation
+    outstanding = initial - 150 + admitted
+    await manager.set_persistent_reservations(tmp_path, {"job": outstanding})
+    await decoder.grow_persistent(100)
+    assert decoder.size_bytes == 300 and decoder.pending_bytes == 150
+    assert manager.pending_disk_bytes(tmp_path) == outstanding == 150
+    await decoder.materialize(100)
+    free[0] -= 100
+    await manager.set_persistent_reservations(tmp_path, {"job": 50}, check_growth=False)
+    assert manager.pending_disk_bytes(tmp_path) == 50
+    await decoder.release_unused()
+    await manager.set_persistent_reservations(tmp_path, {}, check_growth=False)
+    await decoder.release()
+    assert manager.pending_disk_bytes(tmp_path) == manager._reserved_upload_bytes == 0
+
+
+async def test_handoff_rejects_growth_without_outstanding_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("asr_server.audio.workspace.shutil.disk_usage", lambda _path: SimpleNamespace(free=1000))
+    manager = WorkspaceManager(Settings(min_free_disk_mb=0))
+    await manager.set_persistent_reservations(tmp_path, {"job": 200})
+    decoder = await manager.handoff_persistent(tmp_path, "job", 200)
+    await decoder.materialize(150)
+    await manager.set_persistent_reservations(tmp_path, {"job": 50}, check_growth=False)
+    with pytest.raises(RuntimeError, match="not admitted"):
+        await decoder.grow_persistent(1)
+    assert decoder.size_bytes == 200 and decoder.pending_bytes == 50
+    assert manager.pending_disk_bytes(tmp_path) == 50
+    await decoder.release()

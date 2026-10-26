@@ -1,4 +1,27 @@
 export interface User { id: string; username: string; is_admin: boolean; disabled?: boolean }
+export interface StorageUsage {
+  saved_bytes: number;
+  text_bytes: number;
+  temporary_bytes: number;
+  reserved_bytes: number;
+  used_bytes: number;
+  allocated_bytes: number;
+  quota_bytes: number;
+  available_bytes: number;
+  disk_free_bytes?: number;
+}
+export interface AudioAsset {
+  state: 'preparing' | 'ready' | 'failed';
+  codec?: string;
+  bitrate_bps?: number;
+  sample_rate?: number;
+  channels?: number;
+  size_bytes?: number;
+  duration_seconds?: number;
+  sha256?: string;
+  source_stream_index?: number;
+  source_audio_streams?: number;
+}
 export interface ModelOption {
   id: string;
   provider: string;
@@ -43,6 +66,8 @@ export interface Job {
   has_result?: boolean;
   alignment_status?: string;
   model?: string;
+  audio_asset?: AudioAsset;
+  audio_size_bytes?: number;
   progress?: { phase?: string; percent?: number; completed_chunks?: number; total_chunks?: number; current_chunk?: number; text?: string };
   result?: Result | null;
   error?: { code: string; message: string } | null;
@@ -56,12 +81,16 @@ export const errorNames: Record<string, string> = {
   login_rate_limited: '登录尝试过于频繁，请一分钟后重试。', upload_completed: '素材已提交，请在我的任务中管理或删除。',
   workbench_busy: '工作台正在处理较多请求，请稍后重试。',
   upload_not_found: '上传记录已过期或已删除，请重新选择文件。', job_not_found: '任务已过期或已删除。',
-  audio_not_ready: '原音还在准备中，请稍后再试。', result_not_ready: '转录结果尚未生成。',
+  audio_not_ready: '回听音频还在准备中，请稍后再试。', result_not_ready: '转录结果尚未生成。',
   alignment_pending: '字幕正在更新，请稍后再导出。', alignment_incomplete: '字幕尚未完成对齐，可先导出文字。',
   version_conflict: '内容已在其他页面更新，请刷新后再修改。', storage_quota_exceeded: '存储空间不足，请删除不再需要的任务后重试。',
   storage_unavailable: '服务器可用磁盘空间不足，请联系管理员。', audio_too_large: '文件超过服务允许的上传大小。',
   duration_limit_exceeded: '音频时长超过服务限制。', audio_decode_failed: '无法读取素材的音轨，请检查文件是否完整。',
-  source_unavailable: '原音已不可用，无法重新处理此任务。', resume_version_unavailable: '原流程版本不可用，请重新提交素材。',
+  source_unavailable: '任务音频已不可用，无法重新处理此任务。', resume_version_unavailable: '原流程版本不可用，请从头重试或重新提交素材。',
+  checkpoint_version_mismatch: '已保存进度与当前音频处理版本不一致，请从头重试。',
+  mp3_encoder_unavailable: '服务器缺少 MP3 编码器，请联系管理员。',
+  retained_audio_invalid: '已保存音频校验失败，请重新上传素材。', cleanup_failed: '临时音频清理失败，系统会继续重试。',
+  audio_encoder_unavailable: '服务器缺少 MP3 编码器，请联系管理员。', audio_integrity_failed: '素材音轨未通过完整性校验，请检查文件后重试。',
   upload_offset_mismatch: '上传位置已变化，请重试以从服务器记录的位置继续。', upload_corrupt: '上传文件不完整，请重新上传。',
   job_not_retryable: '此任务当前无法重试。', cross_origin_request: '请从工作台自己的地址打开页面后重试。',
   quality_incomplete: '部分音频未能完整转录，已有处理进度已保留，可回听检查后重试。',
@@ -99,8 +128,11 @@ export async function jobDetail(jobId: string, etag?: string): Promise<{ job?: J
 
 export function message(error: unknown): string { return error instanceof Error ? error.message : '操作失败，请重试'; }
 export const terminal = (status: string) => ['completed', 'failed', 'cancelled', 'expired'].includes(status);
+export const retryFromStart = (job: Job) => ['checkpoint_version_mismatch', 'resume_version_unavailable'].includes(job.error?.code || '');
 export const phaseNames: Record<string, string> = {
+  cleanup_pending: '正在清理临时音频',
   queued: '排队中', preprocessing: '准备音频', splitting: '分析语音边界', loading_model: '准备模型',
+  preparing_playback_audio: '准备回听音频', preparing_recognition_audio: '准备识别音频',
   transcribing: '转录中', reviewing: '复核片段', aligning: '对齐字幕', merging: '整理结果',
   completed: '已完成', failed: '处理失败', cancel_requested: '等待取消', cancelled: '已取消',
   expired: '已过期', uploading: '上传中', pending: '字幕更新中', alignment_pending: '字幕更新中',
@@ -108,9 +140,9 @@ export const phaseNames: Record<string, string> = {
 export const phaseName = (value: string) => phaseNames[value] || value;
 export function bytes(value: number) {
   if (!Number.isFinite(value)) return '—';
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KB`;
-  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
-  return `${(value / 1024 ** 3).toFixed(1)} GB`;
+  if (value < 1024 * 1024) return `${(Math.max(0, value) / 1024).toFixed(0)} KiB`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`;
+  return `${(value / 1024 ** 3).toFixed(1)} GiB`;
 }
 export function clock(seconds: number) {
   const n = Math.max(0, Math.floor(seconds));

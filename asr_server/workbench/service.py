@@ -18,6 +18,9 @@ from fastapi import FastAPI
 
 from asr_server.adapters.base import AudioPath, TranscriptionResult
 from asr_server.audio.preprocess import normalize_audio_path_to_wav_async, probe_audio_duration_path_async
+from asr_server.audio.retained import decoder_identity, prepare_retained_audio, validate_retained_audio
+from asr_server.audio.workspace import ResourceLease
+from asr_server.quality.checkpoints import atomic_json, fingerprint
 from asr_server.audio.assets import NormalizedAudioAsset
 from asr_server.config import Settings
 from asr_server.errors import AsrError
@@ -61,6 +64,8 @@ class WorkbenchService:
         self.reconciling = False
         self.preparation_errors: dict[str, BaseException] = {}
         self.prepared_assets: dict[str, NormalizedAudioAsset] = {}
+        self.operation_leases: dict[str, ResourceLease] = {}
+        self.playback_consumers: dict[str, int] = {}
 
     async def transaction(self, operation: Callable[[sqlite3.Connection], T]) -> T:
         def execute() -> T:
@@ -122,6 +127,7 @@ class WorkbenchService:
             self.process_lock = None
             raise
         self.stopping = False
+        await self.recover_audio()
         await self.cleanup()
         async with self.lock:
             uploads = await self.transaction(lambda db: db.execute("SELECT * FROM uploads WHERE job_id IS NULL").fetchall())
@@ -469,6 +475,7 @@ class WorkbenchService:
                     "request": asdict(request), "model_revision": definition.revision, "model_identity": identity,
                     "source_sha256": digest, "delete_requested": False, "cancel_requested": False,
                     "execution_context": context.to_wire(), "retained_file_bytes": {"source": upload["size_bytes"]},
+                    "audio_asset": {"state": "preparing"},
                 }
                 def commit() -> None:
                     root.mkdir(parents=True)
@@ -492,10 +499,11 @@ class WorkbenchService:
 
     def public_job(self, job: dict[str, Any], *, include_result: bool = True) -> dict[str, Any]:
         fields = {"id", "filename", "status", "revision", "created_at", "started_at", "completed_at", "expires_at",
-                  "progress", "error", "result", "model_revision"}
+                  "progress", "error", "result", "model_revision", "audio_asset", "audio_size_bytes"}
         payload = {key: value for key, value in job.items() if key in fields}
         if not include_result:
             payload.pop("result", None)
+        payload["audio_size_bytes"] = int((job.get("audio_asset") or {}).get("size_bytes", 0))
         payload["model"] = job.get("request", {}).get("model")
         payload["queue_position"] = self.app.state.job_manager.external_queue_position(job["id"])
         return payload
@@ -531,17 +539,7 @@ class WorkbenchService:
         """May run while cancel/delete owns service.lock; never acquire it here."""
         self.preparation_errors.pop(job_id, None)
         self.prepared_assets.pop(job_id, None)
-        await self.store.run((self.job_dir(job_id) / "audio.partial.wav").unlink, missing_ok=True)
-        def release_unused() -> None:
-            try:
-                self.record_files_sync(job_id, ["source", "audio.wav"])
-                job = self.store.job_metadata(job_id)
-                self.store.save_job(job, reserved_bytes=sum(job.get("retained_file_bytes", {}).values()))
-            except AsrError as exc:
-                if exc.code != "job_not_found":
-                    raise
-        await self.store.run(release_unused)
-        await self.sync_disk_reservations()
+        await self.cleanup_operation(job_id, locked=False)
 
     def cancelled(self, job_id: str) -> bool:
         return job_id in self.cancel_intents
@@ -578,14 +576,96 @@ class WorkbenchService:
     def record_files_sync(self, job_id: str, names: list[str]) -> None:
         current = self.store.job_metadata(job_id)
         sizes = current.setdefault("retained_file_bytes", {})
+        previous = dict(sizes)
         for name in names:
             path = self.job_dir(job_id) / name
             try:
                 sizes[name] = path.stat().st_size
             except FileNotFoundError:
                 sizes.pop(name, None)
-        self.store.set_physical_usage(job_id, current["owner_id"], sum(sizes.values()))
+        if sizes == previous:
+            return
+        temporary, text = self.store.file_categories(sizes)
+        self.store.set_physical_usage(job_id, current["owner_id"], sum(sizes.values()), temporary_bytes=temporary, text_file_bytes=text)
         self.store.save_job(current)
+
+    async def audio_phase(self, job_id: str, phase: str) -> None:
+        async with self.lock:
+            self.check_running(job_id)
+            job = await self.store.run(self.store.job_metadata, job_id)
+            job["progress"] = {**job.get("progress", {}), "phase": phase}
+            if job["status"] not in TERMINAL:
+                job["status"] = "preprocessing"
+            await self.store.run(self.store.save_job, job)
+
+    async def recover_audio(self) -> None:
+        """No live consumers exist at startup; discard abandoned operation files."""
+        rows = await self.transaction(lambda db: db.execute("SELECT id FROM jobs").fetchall())
+        for row in rows:
+            job_id = str(row["id"])
+            candidate = await self.store.run(self.store.job_metadata, job_id)
+            if candidate.get("delete_requested"):
+                await self.delete_now(candidate)
+                continue
+            await self.cleanup_operation(job_id)
+            job = await self.store.run(self.store.job_metadata, job_id)
+            metadata = job.get("audio_asset") or {"state": "preparing"}
+            if metadata.get("state") != "ready" and (self.job_dir(job_id) / "source").exists():
+                await self.store.run((self.job_dir(job_id) / "audio.mp3").unlink, missing_ok=True)
+            if metadata.get("state") == "ready":
+                try:
+                    await self.store.run(validate_retained_audio, self.job_dir(job_id) / "audio.mp3", metadata)
+                    await self.store.run((self.job_dir(job_id) / "source").unlink, missing_ok=True)
+                except (AsrError, OSError):
+                    metadata = {**metadata, "state": "failed", "error_code": "retained_audio_invalid"}
+                    job["error"] = {"code": "retained_audio_invalid", "message": "saved playback audio failed identity validation", "details": {}}
+                    self.terminal(job, "cancelled" if job.get("cancel_requested") else "failed")
+            job["audio_asset"] = metadata
+            await self.store.run(self.store.save_job, job)
+            await self.record_files(job_id, ["source", "audio.mp3"])
+
+    async def cleanup_operation(self, job_id: str, *, locked: bool = True) -> None:
+        root = self.job_dir(job_id)
+        def remove() -> None:
+            for name in ("work", "operation"):
+                path = root / name
+                if path.exists():
+                    shutil.rmtree(path)
+            for path in root.glob("*.partial*"):
+                path.unlink(missing_ok=True)
+        try:
+            await asyncio.to_thread(remove)
+        except OSError as exc:
+            async def pending() -> None:
+                current = await self.store.run(self.store.job_metadata, job_id)
+                current["status"] = "cleanup_pending"
+                current["progress"] = {"phase": "cleanup_pending"}
+                current["error"] = {"code": "cleanup_failed", "message": "temporary audio cleanup will be retried", "details": {}}
+                await self.store.run(self.store.save_job, current)
+            if locked:
+                async with self.lock:
+                    await pending()
+            else:
+                await pending()
+            raise AsrError(503, "cleanup_failed", "temporary audio could not be removed; cleanup will be retried") from exc
+        lease = self.operation_leases.pop(job_id, None)
+        if lease is not None:
+            await lease.release()
+        async def settle() -> None:
+            current = await self.store.run(self.store.job_metadata, job_id)
+            names = list(current.get("retained_file_bytes", {}))
+            await self.store.run(self.record_files_sync, job_id, names)
+            current = await self.store.run(self.store.job_metadata, job_id)
+            retained = sum(current.get("retained_file_bytes", {}).values())
+            reserved = await self.transaction(lambda db: db.execute("SELECT reserved_bytes FROM jobs WHERE id=?", (job_id,)).fetchone()[0])
+            if reserved != retained:
+                await self.store.run(self.store.save_job, current, reserved_bytes=retained)
+            await self.sync_disk_reservations()
+        if locked:
+            async with self.lock:
+                await settle()
+        else:
+            await settle()
 
     async def prepare_audio(self, job_id: str) -> NormalizedAudioAsset:
         self.check_running(job_id)
@@ -593,64 +673,103 @@ class WorkbenchService:
         request = TranscriptionRequest(**job["request"])
         definition = self.app.state.manager.runtime_for(request.model or self.app.state.manager.default_model_id).definition
         if job.get("model_identity") is not None and await self.store.run(self.execution_identity, request) != job["model_identity"]:
-            raise AsrError(409, "resume_version_unavailable", "saved execution identity is unavailable; submit a new task")
-        root = self.job_dir(job_id)
-        audio = root / "audio.wav"
-        source = root / "source"
-        if not audio.exists():
-            context = self.context_for(job)
-            duration = await probe_audio_duration_path_async(source, timeout_seconds=self.settings.ffprobe_timeout_seconds, cancel_event=context.cancel_event)
-            # Container duration is an estimate (notably for VBR MP3). Actual
-            # decoded frames enforce the six-hour limit, never ffprobe alone.
-            pcm_limit = 21600 * definition.audio_spec.bytes_per_second + 44
-            pcm_budget = min(pcm_limit, int(min(duration or 60, 21600) * definition.audio_spec.bytes_per_second) + 44)
-            margin = self.processing_margin(request, 21600)
-            # Initial PCM estimate plus one bounded worker slice; grow before
-            # writing additional decoded bytes, under the same quota checks.
-            await self.reserve_processing(job, pcm_budget + margin)
-            temp_audio = root / "audio.partial.wav"
-            lease = await self.app.state.workspace_manager.handoff_persistent(root, "job:" + job_id, pcm_budget)
-            async def ensure_output_capacity(required: int) -> None:
-                if required <= lease.size_bytes:
-                    return
-                desired = min(pcm_limit, max(required, lease.size_bytes + 1024 * 1024))
-                await self.reserve_processing(job, desired + margin)
-                await lease.grow_persistent(desired - lease.size_bytes)
+            raise AsrError(409, "resume_version_unavailable", "saved execution identity is unavailable; start from the beginning")
+        root, context = self.job_dir(job_id), self.context_for(job)
+        source, playback = root / "source", root / "audio.mp3"
+        metadata = job.get("audio_asset") or {"state": "preparing"}
+        if metadata.get("state") != "ready":
+            if source.exists():
+                await self.store.run(playback.unlink, missing_ok=True)
+            async with self.lock:
+                current = await self.store.run(self.store.job_metadata, job_id)
+                current["audio_asset"] = {"state": "preparing"}
+                await self.store.run(self.store.save_job, current)
+            await self.audio_phase(job_id, "preparing_playback_audio")
+            estimate = await probe_audio_duration_path_async(source, timeout_seconds=self.settings.ffprobe_timeout_seconds, cancel_event=context.cancel_event)
+            mp3_limit = 21600 * 24000 + 1024 * 1024
+            mp3_budget = min(mp3_limit, int(min(estimate or 60, 21600) * 24000) + 1024 * 1024)
+            await self.reserve_processing(job, mp3_budget)
+            lease = await self.app.state.workspace_manager.handoff_persistent(root, "job:" + job_id, mp3_budget)
+            written = 0
+            async def grow_mp3(required: int) -> None:
+                if required > lease.size_bytes:
+                    desired = min(mp3_limit, max(required, lease.size_bytes + 1024 * 1024))
+                    await self.reserve_processing(await self.store.run(self.store.job_metadata, job_id), desired - written)
+                    await lease.grow_persistent(desired - lease.size_bytes)
+            async def wrote_mp3(total: int) -> None:
+                nonlocal written
+                await lease.materialize(total - written)
+                written = total
+                await self.record_files(job_id, ["audio.partial.mp3"])
             try:
-                normalized = await normalize_audio_path_to_wav_async(source, temp_audio, timeout_seconds=self.settings.ffmpeg_timeout_seconds,
-                    max_output_bytes=pcm_limit, max_duration_seconds=21600, spec=definition.audio_spec,
-                    cancel_event=context.cancel_event, owner=job_id, resource_lease=lease,
-                    ensure_output_capacity=ensure_output_capacity)
-                await lease.release_unused()
-                asset = normalized.asset
-                if asset is None:
-                    asset = await self.store.run(NormalizedAudioAsset.from_path, temp_audio, spec=definition.audio_spec, owner=job_id)
-                await self.store.run(temp_audio.replace, audio)
-                asset = asset.relocated(audio)
+                metadata = await prepare_retained_audio(source, playback, max_duration_seconds=21600,
+                    max_output_bytes=mp3_limit, min_free_disk_bytes=self.settings.min_free_disk_mb * 1024 * 1024,
+                    context=context, ensure_output_capacity=grow_mp3, output_written=wrote_mp3)
+                # Commit ready metadata before removing the sole original upload.
                 async with self.lock:
                     current = await self.store.run(self.store.job_metadata, job_id)
-                    current["normalized_asset"] = asset.to_metadata()
+                    current["audio_asset"] = metadata
                     await self.store.run(self.store.save_job, current)
+                await self.record_files(job_id, ["source", "audio.mp3", "audio.partial.mp3"])
                 await self.store.run(source.unlink, missing_ok=True)
-                await self.record_files(job_id, ["source", "audio.wav"])
-                await self.settle_processing_reservation(job_id, margin)
+                await self.record_files(job_id, ["source", "audio.mp3"])
+            except BaseException:
+                async with self.lock:
+                    current = await self.store.run(self.store.job_metadata, job_id)
+                    if (current.get("audio_asset") or {}).get("state") != "ready":
+                        current["audio_asset"] = {"state": "failed"}
+                        await self.store.run(self.store.save_job, current)
+                raise
             finally:
                 await lease.release()
         else:
-            if job.get("normalized_asset") is None:
-                if await self.store.run((root / "checkpoints").exists):
-                    raise AsrError(409, "resume_version_unavailable", "saved audio predates normalized asset identity; submit a new task to retain the old checkpoints")
-                asset = await self.store.run(NormalizedAudioAsset.from_path, audio, spec=definition.audio_spec, owner=job_id)
-                async with self.lock:
-                    current = await self.store.run(self.store.job_metadata, job_id)
-                    current["normalized_asset"] = asset.to_metadata()
-                    await self.store.run(self.store.save_job, current)
-            else:
-                asset = await self.store.run(NormalizedAudioAsset.from_metadata, audio, job["normalized_asset"], spec=definition.audio_spec)
-            margin = self.processing_margin(request, asset.duration)
-            await self.reserve_processing(job, margin)
-            await self.settle_processing_reservation(job_id, margin)
-            emit("media.reused", output_bytes=asset.size_bytes)
+            await self.store.run(validate_retained_audio, playback, metadata)
+        self.check_running(job_id)
+        await self.audio_phase(job_id, "preparing_recognition_audio")
+        operation = root / "operation"
+        operation.mkdir(exist_ok=True)
+        audio = operation / "audio.wav"
+        pcm_limit = 21600 * definition.audio_spec.bytes_per_second + 44
+        pcm_budget = min(pcm_limit, int(float(metadata["duration_seconds"]) * definition.audio_spec.bytes_per_second) + 4096)
+        margin = self.processing_margin(request, float(metadata["duration_seconds"]))
+        await self.reserve_processing(await self.store.run(self.store.job_metadata, job_id), pcm_budget + margin)
+        pcm_lease = await self.app.state.workspace_manager.handoff_persistent(root, "job:" + job_id, pcm_budget)
+        self.operation_leases[job_id] = pcm_lease
+        last_recorded = 0
+        async def grow_pcm(required: int) -> None:
+            nonlocal last_recorded
+            if required - last_recorded >= 1024 * 1024 or required > pcm_lease.size_bytes:
+                await self.record_files(job_id, ["operation/audio.wav"])
+                last_recorded = required
+            if required > pcm_lease.size_bytes:
+                desired = min(pcm_limit, max(required, pcm_lease.size_bytes + 1024 * 1024))
+                current = await self.store.run(self.store.job_metadata, job_id)
+                materialized = current.get("retained_file_bytes", {}).get("operation/audio.wav", 0)
+                await self.reserve_processing(current, desired - materialized + margin)
+                await pcm_lease.grow_persistent(desired - pcm_lease.size_bytes)
+        normalized = await normalize_audio_path_to_wav_async(playback, audio,
+            timeout_seconds=self.settings.ffmpeg_timeout_seconds, max_output_bytes=pcm_limit,
+            max_duration_seconds=21600, spec=definition.audio_spec, cancel_event=context.cancel_event,
+            owner=job_id, resource_lease=pcm_lease, ensure_output_capacity=grow_pcm)
+        await pcm_lease.release_unused()
+        asset = normalized.asset
+        if asset is None:
+            asset = await self.store.run(NormalizedAudioAsset.from_path, audio, spec=definition.audio_spec, owner=job_id)
+        stable_identity = {"retained_sha256": metadata["sha256"], "retained_version": metadata["version"],
+                           "decoder": await decoder_identity(context=context), "pcm": asset.to_metadata()}
+        identity_path = root / "checkpoints" / "audio-identity.json"
+        if identity_path.exists():
+            previous = await self.store.run(lambda: json.loads(identity_path.read_text()))
+            if fingerprint(previous) != fingerprint(stable_identity):
+                raise AsrError(409, "checkpoint_version_mismatch", "playback audio or PCM decoding identity differs; retry from the beginning", {"can_retry_from_start": True})
+        else:
+            await self.store.run(atomic_json, identity_path, stable_identity)
+        async with self.lock:
+            current = await self.store.run(self.store.job_metadata, job_id)
+            current["normalized_asset"] = asset.to_metadata()
+            await self.store.run(self.store.save_job, current)
+        await self.record_files(job_id, ["operation/audio.wav", "checkpoints/audio-identity.json"])
+        await self.settle_processing_reservation(job_id, margin)
         self.check_running(job_id)
         return asset
 
@@ -717,7 +836,7 @@ class WorkbenchService:
             )
             self.check_running(job_id)
             self.prepare_result(result, segment_timestamps=definition.capabilities.segment_timestamps)
-            await asyncio.to_thread(shutil.rmtree, workspace, True)
+            await self.cleanup_operation(job_id)
             async with self.lock:
                 self.check_running(job_id)
                 job = await self.store.run(self.store.job_metadata, job_id)
@@ -758,8 +877,7 @@ class WorkbenchService:
                 job["progress"]["phase"] = "queued"
                 (await self.store.run(self.store.save_job, job))
             else:
-                await asyncio.to_thread(shutil.rmtree, workspace, True)
-                await self.store.run((root / "audio.partial.wav").unlink, missing_ok=True)
+                await self.cleanup_operation(job_id)
                 finish_cancel = False
                 async with self.lock:
                     current = (await self.store.run(self.store.job_metadata, job_id))
@@ -781,16 +899,23 @@ class WorkbenchService:
         finally:
             self.prepared_assets.pop(job_id, None)
             self.preparation_errors.pop(job_id, None)
-            await asyncio.to_thread(shutil.rmtree, workspace, True)
-            self.active.discard(job_id)
+            try:
+                await self.cleanup_operation(job_id)
+            except AsrError as exc:
+                if exc.code != "cleanup_failed":
+                    raise
+            finally:
+                self.active.discard(job_id)
             try:
                 async with self.lock:
                     job = (await self.store.run(self.store.job_metadata, job_id))
-                    if job.get("delete_requested"):
+                    if job.get("delete_requested") and not self.playback_consumers.get(job_id, 0):
                         await self.delete_now(job)
                     elif root.exists():
                         reserved = sum(job.get("retained_file_bytes", {}).values())
-                        (await self.store.run(self.store.save_job, job, reserved_bytes=reserved))
+                        existing = await self.transaction(lambda db: db.execute("SELECT reserved_bytes FROM jobs WHERE id=?", (job_id,)).fetchone()[0])
+                        if existing != reserved:
+                            await self.store.run(self.store.save_job, job, reserved_bytes=reserved)
                         await self.sync_disk_reservations()
             except AsrError:
                 pass
@@ -817,8 +942,7 @@ class WorkbenchService:
         result["versions"] = [{"version": 1, "created_at": now(), "alignment_status": result["alignment_status"]}]
 
     async def finish_cancel(self, job: dict[str, Any]) -> None:
-        await asyncio.to_thread(shutil.rmtree, self.job_dir(job["id"]) / "work", True)
-        await self.store.run((self.job_dir(job["id"]) / "audio.partial.wav").unlink, missing_ok=True)
+        await self.cleanup_operation(job["id"])
         async with self.lock:
             try:
                 # DELETE may have been requested while file cleanup awaited.
@@ -832,7 +956,7 @@ class WorkbenchService:
             current["cancel_requested"] = True
             current["progress"]["phase"] = "cancelled"
             self.prepared_assets.pop(job["id"], None)
-            await self.store.run(self.record_files_sync, job["id"], ["source", "audio.wav"])
+            await self.store.run(self.record_files_sync, job["id"], ["source", "audio.mp3"])
             current["retained_file_bytes"] = (await self.store.run(self.store.job_metadata, job["id"]))["retained_file_bytes"]
             await self.store.run(self.store.save_job, current, reserved_bytes=sum(current["retained_file_bytes"].values()))
             await self.sync_disk_reservations()
@@ -848,7 +972,8 @@ class WorkbenchService:
             self.cancel_intents.add(job_id)
             self.context_for(job).cancel_event.set()
             (await self.store.run(self.store.save_job, job))
-            removed = await self.app.state.job_manager.cancel_external(job_id)
+        removed = await self.app.state.job_manager.cancel_external(job_id)
+        async with self.lock:
             finish_now = removed or job_id not in self.active
         if finish_now:
             await self.finish_cancel(job)
@@ -863,15 +988,30 @@ class WorkbenchService:
             self.cancel_intents.add(job_id)
             self.context_for(job).cancel_event.set()
             (await self.store.run(self.store.save_job, job))
-            await self.app.state.job_manager.cancel_external(job_id)
-            await self.app.state.job_manager.cancel_external("align:" + job_id)
-            if job_id in self.active:
+        await self.app.state.job_manager.cancel_external(job_id)
+        await self.app.state.job_manager.cancel_external("align:" + job_id)
+        async with self.lock:
+            try:
+                job = await self.store.run(self.store.job_metadata, job_id, owner)
+            except AsrError as exc:
+                if exc.code == "job_not_found":
+                    return True
+                raise
+            if job_id in self.active or self.playback_consumers.get(job_id, 0):
                 return False
             await self.delete_now(job)
             return True
 
     async def delete_now(self, job: dict[str, Any]) -> None:
-        await asyncio.to_thread(shutil.rmtree, self.job_dir(job["id"]), True)
+        path = self.job_dir(job["id"])
+        try:
+            if path.exists():
+                await asyncio.to_thread(shutil.rmtree, path)
+        except OSError as exc:
+            raise AsrError(503, "cleanup_failed", "task files could not be removed; retry deletion") from exc
+        lease = self.operation_leases.pop(job["id"], None)
+        if lease is not None:
+            await lease.release()
         def remove(db: sqlite3.Connection) -> None:
             db.execute("DELETE FROM versions WHERE job_id=?", (job["id"],))
             db.execute("DELETE FROM uploads WHERE job_id=?", (job["id"],))
@@ -886,13 +1026,47 @@ class WorkbenchService:
         self.preparation_errors.pop(job["id"], None)
         self.prepared_assets.pop(job["id"], None)
 
-    async def retry(self, owner: str, job_id: str) -> dict[str, Any]:
+    async def acquire_playback(self, owner: str, job_id: str) -> Path:
+        async with self.lock:
+            job = await self.store.run(self.store.job_metadata, job_id, owner)
+            state = (job.get("audio_asset") or {}).get("state", "preparing")
+            path = self.job_dir(job_id) / "audio.mp3"
+            if job.get("delete_requested"):
+                raise AsrError(409, "job_deleting", "task deletion is in progress")
+            if state != "ready" or not path.exists():
+                raise AsrError(409, "audio_not_ready", "playback audio is not ready", {"state": state})
+            self.playback_consumers[job_id] = self.playback_consumers.get(job_id, 0) + 1
+            return path
+
+    async def release_playback(self, job_id: str) -> None:
+        async with self.lock:
+            remaining = self.playback_consumers.get(job_id, 0) - 1
+            if remaining > 0:
+                self.playback_consumers[job_id] = remaining
+                return
+            self.playback_consumers.pop(job_id, None)
+            if job_id not in self.active:
+                job = await self.store.run(self.store.job_metadata, job_id)
+                if job.get("delete_requested"):
+                    await self.delete_now(job)
+
+    async def retry(self, owner: str, job_id: str, *, from_start: bool = False) -> dict[str, Any]:
         async with self.lock:
             job = (await self.store.run(self.store.job, job_id, owner))
             if job["status"] not in {"failed", "cancelled"}:
                 raise AsrError(409, "job_not_retryable", "only failed or cancelled tasks can be retried")
-            if not (self.job_dir(job_id) / "audio.wav").exists() and not (self.job_dir(job_id) / "source").exists():
+            if not (self.job_dir(job_id) / "audio.mp3").exists() and not (self.job_dir(job_id) / "source").exists():
                 raise AsrError(409, "source_unavailable", "original audio is unavailable")
+            if from_start:
+                checkpoint_root = self.job_dir(job_id) / "checkpoints"
+                if checkpoint_root.exists():
+                    await self.store.run(shutil.rmtree, checkpoint_root)
+                job.pop("normalized_asset", None)
+                job["model_identity"] = await self.store.run(self.execution_identity, TranscriptionRequest(**job["request"]))
+                job["model_revision"] = self.app.state.manager.runtime_for(job["request"]["model"]).definition.revision
+                with self.store.connection() as db:
+                    db.execute("DELETE FROM job_chunks WHERE job_id=?", (job_id,))
+                job["retained_file_bytes"] = {name: size for name, size in job.get("retained_file_bytes", {}).items() if not name.startswith("checkpoints/")}
             job["status"] = "queued"
             job["cancel_requested"] = False
             job["error"] = None
@@ -973,11 +1147,13 @@ class WorkbenchService:
             if result["alignment_status"] != "pending" or not segment_id:
                 return
             target = next(s for s in result["segments"] if s["id"] == segment_id)
-            audio = AudioPath(self.job_dir(job_id) / "audio.wav", target["start"], target["end"])
+            asset = await self.prepare_audio(job_id)
+            audio = AudioPath(asset.path, target["start"], target["end"])
             items = await self.app.state.manager.align_text(
                 audio, text=target["text"], model_id=job["request"]["model"],
                 backend="auto", language=job["request"]["language"], timestamps="auto",
             ) if target["text"] else []
+            await self.cleanup_operation(job_id)
             async with self.lock:
                 latest = (await self.store.run(self.store.job, job_id))
                 if latest.get("delete_requested") or latest["status"] == "cancel_requested":
@@ -1000,6 +1176,7 @@ class WorkbenchService:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            await self.cleanup_operation(job_id)
             job = (await self.store.run(self.store.job, job_id))
             if self.stopping or job.get("delete_requested") or job.get("cancel_requested"):
                 return  # Keep pending alignment for recovery, or honor deletion.
@@ -1010,10 +1187,16 @@ class WorkbenchService:
                 result["versions"][-1]["alignment_status"] = "failed"
                 (await self.store.run(self.store.save_version, job))
         finally:
-            self.active.discard(job_id)
+            try:
+                await self.cleanup_operation(job_id)
+            except AsrError as exc:
+                if exc.code != "cleanup_failed":
+                    raise
+            finally:
+                self.active.discard(job_id)
             try:
                 job = (await self.store.run(self.store.job, job_id))
-                if job.get("delete_requested"):
+                if job.get("delete_requested") and not self.playback_consumers.get(job_id, 0):
                     await self.delete_now(job)
             except AsrError:
                 pass
@@ -1048,7 +1231,8 @@ class WorkbenchService:
                         seen.add(inode)
                 except FileNotFoundError:
                     continue
-            self.store.set_physical_usage(row["id"], row["owner_id"], sum(files.values()))
+            temporary, text = self.store.file_categories(files)
+            self.store.set_physical_usage(row["id"], row["owner_id"], sum(files.values()), temporary_bytes=temporary, text_file_bytes=text)
             with self.store.connection() as db:
                 db.execute("UPDATE jobs SET payload=json_set(payload,'$.retained_file_bytes',json(?)) WHERE id=?", (json.dumps(files), row["id"]))
         with self.store.connection() as db:
@@ -1059,9 +1243,27 @@ class WorkbenchService:
 
     async def cleanup(self) -> None:
         async with self.lock:
+            pending = await self.transaction(lambda db: db.execute("SELECT id FROM jobs WHERE status='cleanup_pending' OR json_extract(payload,'$.delete_requested')=1").fetchall())
+            for row in pending:
+                key = row["id"]
+                if key in self.active or self.playback_consumers.get(key, 0):
+                    continue
+                try:
+                    task = await self.store.run(self.store.job_metadata, key)
+                    if task.get("delete_requested"):
+                        await self.delete_now(task)
+                    else:
+                        await self.cleanup_operation(key, locked=False)
+                        task = await self.store.run(self.store.job_metadata, key)
+                        self.terminal(task, "cancelled" if task.get("cancel_requested") else "failed")
+                        task["progress"] = {"phase": task["status"]}
+                        await self.store.run(self.store.save_job, task)
+                except AsrError as exc:
+                    if exc.code != "cleanup_failed":
+                        raise
             expired_ids = await self.transaction(lambda db: db.execute("SELECT id FROM jobs WHERE status IN ('completed','failed','cancelled') AND json_extract(summary,'$.expires_at')<=?", (now(),)).fetchall())
             for row in expired_ids:
-                if row["id"] not in self.active:
+                if row["id"] not in self.active and not self.playback_consumers.get(row["id"], 0):
                     await self.delete_now(await self.store.run(self.store.job, row["id"]))
             def cleanup_rows(db: sqlite3.Connection) -> tuple[set[str], set[str]]:
                 expired = db.execute("SELECT id,owner_id FROM uploads WHERE job_id IS NULL AND expires_at<=?", (now(),)).fetchall()

@@ -1,6 +1,6 @@
 # 平台执行与资源契约
 
-更新：2026-10-25。对应[改进计划](asr-platform-improvement-plan.md)的本地实现；实际检查、性能和未验收项见[验收记录](validation-2026-10-25-platform.md)。现有模型的语言、生成预算、质量复核、说话人范围和能力启用门槛保持原契约。
+更新：2026-10-26。[改进计划](asr-platform-improvement-plan.md)的基础资源契约及[工作台音频方案](workbench-audio-storage-plan.md)的 schema 4 扩展；此前实际检查、性能和未验收项见[平台验收记录](validation-2026-10-25-platform.md)。现有模型的语言、生成预算、质量复核、说话人范围和能力启用门槛保持原契约；MP3 新流程的实机及听感结论需另以本次验收记录为准。
 
 ## 请求、调度与取消
 
@@ -24,13 +24,21 @@
 
 窗口按整数采样位置前进，显式零及非有限数受控拒绝。多个 VAD 区间共用追加前的 4096 块上限；扫描、合并和窗口循环均检查同一取消信号。
 
-工作台原始上传按所选模型规格只归一化一次，`NormalizedAudioAsset` 记录规格、帧数、PCM SHA256、owner 和 `pcm16-wav-v2` 版本；质量与普通流程借用同一文件。正常重试验证资产后复用，无重复解码。同次操作直接传递已验证资产，借用时核对文件身份、大小及纳秒修改时间；跨恢复边界仍完整校验 PCM SHA256。质量检查点的完整文件摘要计算继续保留，避免改变既有身份。借用者不得删除原资产。新 WAV 使用确定的 44 字节头，质量 checkpoint 身份同时包含规范化、引擎、模型、pipeline、输入规格、请求、词库、aligner 和检测器身份。旧资产缺身份且已有 checkpoint 时明确拒绝混用，保留旧记录并要求新建任务。
+工作台以 `audio.mp3` 作为持久音频：192 kbps CBR；44.1/48 kHz 源保持，其余转 48 kHz，单/双声道保持，多声道固定混为双声道，记录首条音轨的实际索引及数量。标准化模块与模型预处理分离，不附加降噪、增益或静音裁剪。符合标准的 MP3 需完整检查 MPEG 帧、编码、采样率、声道、解码有效帧数和尾部后才能直接复用；平均码率不能证明 CBR。输出校验考虑编码延迟和尾部填充，不能只比较容器 duration。编码/解码沿用协议白名单、取消、deadline、磁盘与实际字节预算；超过六小时或异常尾部不得提交假 ready。
+
+MP3 使用 partial 和原子重命名，数据库记录 preparing/ready/failed、版本、SHA256、大小、有效时长、时间轴及工具身份；ready 持久化后才删除唯一上传源。失败保留 source，回收 owned partial，重试可重新准备。启动恢复核对 ready 文件存在性与身份，清理无 owner 操作临时文件与无效预留，不从旧 WAV 恢复播放。
+
+每次转录或编辑对齐从同一标准 MP3 按选中模型规格生成受控 PCM。`NormalizedAudioAsset` 记录规格、帧数、PCM SHA256、owner 和 `pcm16-wav-v2` 版本；转录、自动复核和初始对齐在一次操作内借用同一资产。借用时核对文件身份、大小及纳秒修改时间，借用者不得删除资产；owner 等所有消费者退出，删除 PCM、分片并结算 lease 后发布终态。重试和编辑对齐重新解码，不重新编码 MP3。编辑对齐先完整解码，再按整数采样窗口取段，避免 MP3 随机截取的帧边界偏移。
+
+新 WAV 使用确定的 44 字节头。质量 checkpoint 身份包含标准 MP3 摘要、解码规范、PCM 摘要、规范化、引擎、模型、pipeline、输入规格、请求、词库、aligner 和检测器身份；临时路径及 inode 不作跨操作身份。每次重建 PCM 验证摘要，不一致时返回 `checkpoint_version_mismatch` 或 `resume_version_unavailable`，不得拼接旧 chunk；用户可用 `POST /api/jobs/{id}/retry` 的 `{ "from_start": true }` 从头重试。旧 `/v1/**` 的临时输入、模型能力与质量默认值保持原行为。
 
 ## 工作台存储与查询
 
 SQLite 使用 WAL；完整 repository 操作通过有界 executor 在线程内建连、执行事务和关闭。密码计算使用独立两槽执行器，等待数量有上限；登录失败地址记录按 TTL 和容量清理。
 
-数据库 schema 3 为增加式迁移：摘要、revision、状态索引和容量账本；正文复用 versions 表，已完成块位于 job_chunks，jobs 只保存状态及引用。旧 payload 迁入 legacy_job_payloads 保留对照，未删除重建用户数据库。分块 checkpoint 写入后才发布完成块；普通显示进度至多每秒落盘一次，chunk、取消/删除、版本和终态立即持久化。容量日常准入查事务账本，文件扫描移至启动恢复和低频维护。提交源摘要在每上传锁内计算，离开全局锁，再在短事务中复查上传状态及幂等身份。
+数据库 schema 4 保存音频元数据和分类容量账本，延续摘要、revision、状态索引、正文 versions 和已完成块 job_chunks 的分离。升级前离线清除旧任务、上传、版本、chunk、legacy payload 和关联文件，保留账户及公共词库，不导入旧正文或旧 WAV；旧 schema 含任务/上传时启动返回 `schema_reset_required`，空库可升级。分块 checkpoint 写入后才发布完成块；普通显示进度至多每秒落盘一次，chunk、取消/删除、版本和终态立即持久化。提交源摘要在每上传锁内计算，离开全局锁，再在短事务中复查上传状态及幂等身份。
+
+分类为保留文件 `saved_bytes`、文字及版本 `text_bytes`、已落盘操作文件 `temporary_bytes`、未兑现 `reserved_bytes`；前三项相加为 used，used 加未兑现预留为 allocated。准入使用完整 allocated 与磁盘未兑现承诺，不重复加入已经落盘的预留。源文件、MP3 与 PCM 同时存活的峰值受预算保护，删除失败保留实际占用。容量日常查询读账本，目录扫描仅在启动恢复和低频维护。`GET /api/storage` 返回个人分类、quota 和 available；管理员 status 返回全局分类及独立 `disk_free_bytes`。任务摘要同时返回 `audio_size_bytes` 和轻量音频规格；播放接口只提供 ready MP3，`audio/mpeg`、Range、owner 与私有缓存保持。
 
 `GET /api/jobs?view=summary&limit=50&before=<sequence>` 返回 `{jobs,next_cursor}`，不读取正文；limit 上限 100。`ids` 可限制活动任务轮询，保留 owner 条件。旧列表调用仍可用。详情返回 revision/ETag，`If-None-Match` 未变化时 `304`。前端只轮询活动任务，隐藏页降低频率，终态停止固定拉正文，编辑后主动失效刷新。管理员队列只含任务/模型/状态/时间/队列位置/chunk计数/错误码白名单。`/health` 返回缓存 GPU 快照及 `gpu_snapshot_at`，请求不触发 CUDA 查询。
 
@@ -40,4 +48,4 @@ SQLite 使用 WAL；完整 repository 操作通过有界 executor 在线程内�
 
 新增设置见 [.env.example](../.env.example)：`ASR_RECEIVE_SLOTS`、`ASR_RECEIVE_TIMEOUT_SECONDS`、`ASR_MULTIPART_METADATA_BYTES`、`ASR_PREPROCESSING_PREFETCH`、`ASR_TEMP_DIR`、`ASR_LOG_LEVEL/FORMAT/DIR`。`ASR_ADAPTER=registered` 是通用注册器入口，旧 `qwen` 配置保持兼容；不会自动启用新生产模型。`.env` 仍仅由部署生成的 systemd unit 读取。
 
-升级前停止写入，使用原 `scripts.workbench_release backup` 保存完整数据与配套源码/前端。先在副本上运行 schema 迁移并核对任务、版本、chunk、owner 和配额。回滚恢复配套旧源码、前端及迁移前数据库备份；旧程序不得直接读取新 schema。新版本拒绝未来未知 schema。测试与发布检查入口见[测试去向表](asr-platform-test-map.md)。本轮源码改动不等于线上已切换。
+升级先在隔离数据目录验证目标 FFmpeg MP3 编码器和完整真实流程，再关闭新准入，等待活跃操作安全结束并停止服务，使用 `scripts.workbench_release backup` 保存完整数据与配套旧源码/前端。`scripts.workbench_reset_tasks --data-dir ...` 默认只预览数量与字节，加 `--apply` 清除已授权旧任务及其专属文件并重建账本；工具取得离线 service.lock，核对用户、会话及词库身份保持，不触碰模型缓存。安装 schema 4 后核对登录、词库、空任务和容量，再走新样本流程并恢复准入。回滚恢复配套旧源码、前端及迁移前完整数据；旧程序不得直接读取新 schema。临时旧任务备份在本次验收完成后清除并核对空间释放。新版本拒绝未来未知 schema。测试与发布检查入口见[测试去向表](asr-platform-test-map.md)。源码改动不等于线上已切换。

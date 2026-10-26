@@ -17,7 +17,7 @@ from asr_server.workbench.security import password_hash, token_hash
 
 P = ParamSpec("P")
 T = TypeVar("T")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _summary_sql(payload: str) -> str:
@@ -25,6 +25,9 @@ def _summary_sql(payload: str) -> str:
     pairs = [f"'{field}',json_extract({payload},'$.{field}')" for field in fields]
     pairs += [
         f"'model',json_extract({payload},'$.request.model')",
+        f"'audio_size_bytes',coalesce(json_extract({payload},'$.audio_asset.size_bytes'),0)",
+        "'audio_asset',json_object(" + ",".join(f"'{key}',json_extract({payload},'$.audio_asset.{key}')" for key in
+            ["state", "codec", "bitrate_bps", "sample_rate", "channels", "size_bytes", "duration_seconds", "source_stream_index", "source_audio_streams"]) + ")",
         f"'has_result',json_type({payload},'$.result')='object'",
         f"'alignment_status',json_extract({payload},'$.result.alignment_status')",
         f"'version',json_extract({payload},'$.result.version')",
@@ -71,6 +74,12 @@ class WorkbenchStore:
             schema = int(db.execute("PRAGMA user_version").fetchone()[0])
             if schema > SCHEMA_VERSION:
                 raise AsrError(409, "schema_version_unavailable", "database requires a newer workbench version")
+            if schema < SCHEMA_VERSION:
+                tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if any(table in tables and db.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+                       for table in ("jobs", "uploads", "versions", "job_chunks", "legacy_job_payloads", "assets")):
+                    raise AsrError(409, "schema_reset_required",
+                                   "old workbench tasks require offline cleanup before schema 4; run scripts.workbench_reset_tasks")
             db.executescript("""
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS users (
@@ -118,7 +127,9 @@ class WorkbenchStore:
         self.executor.close()
 
     def _migrate(self, db: sqlite3.Connection) -> None:
-        """Additive migration keeps historical payloads and versions intact."""
+        """Upgrade an empty task store while preserving accounts and glossary."""
+        for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall():
+            db.execute(f'DROP TRIGGER "{name}"')
         columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
         for name, definition in {"summary": "TEXT NOT NULL DEFAULT '{}'", "revision": "INTEGER NOT NULL DEFAULT 1"}.items():
             if name not in columns:
@@ -126,6 +137,14 @@ class WorkbenchStore:
         db.execute("CREATE INDEX IF NOT EXISTS jobs_status_sequence ON jobs(status,sequence)")
         db.execute("CREATE TABLE IF NOT EXISTS capacity (owner_id TEXT PRIMARY KEY, logical_bytes INTEGER NOT NULL DEFAULT 0, physical_bytes INTEGER NOT NULL DEFAULT 0)")
         db.execute("CREATE TABLE IF NOT EXISTS assets (asset_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, physical_bytes INTEGER NOT NULL)")
+        for table, additions in {
+            "capacity": {"media_budget_bytes": "INTEGER NOT NULL DEFAULT 0", "temporary_bytes": "INTEGER NOT NULL DEFAULT 0", "text_file_bytes": "INTEGER NOT NULL DEFAULT 0"},
+            "assets": {"temporary_bytes": "INTEGER NOT NULL DEFAULT 0", "text_file_bytes": "INTEGER NOT NULL DEFAULT 0"},
+        }.items():
+            current = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            for name, definition in additions.items():
+                if name not in current:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
         db.execute("CREATE INDEX IF NOT EXISTS assets_owner ON assets(owner_id)")
         db.execute("CREATE TABLE IF NOT EXISTS job_chunks (job_id TEXT NOT NULL, chunk_index INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(job_id,chunk_index))")
         db.execute("CREATE TABLE IF NOT EXISTS legacy_job_payloads (job_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, payload TEXT NOT NULL)")
@@ -138,17 +157,21 @@ class WorkbenchStore:
             "coalesce((SELECT sum(length(CAST(v.payload AS BLOB))) FROM versions v JOIN jobs j ON j.id=v.job_id WHERE j.owner_id=capacity.owner_id),0)+"
             "coalesce((SELECT sum(length(CAST(c.payload AS BLOB))) FROM job_chunks c JOIN jobs j ON j.id=c.job_id WHERE j.owner_id=capacity.owner_id),0)+"
             "coalesce((SELECT sum(length(CAST(payload AS BLOB))) FROM legacy_job_payloads WHERE owner_id=capacity.owner_id),0),"
-            "physical_bytes=coalesce((SELECT sum(physical_bytes) FROM assets WHERE owner_id=capacity.owner_id),0)")
+            "physical_bytes=coalesce((SELECT sum(physical_bytes) FROM assets WHERE owner_id=capacity.owner_id),0),"
+            "temporary_bytes=coalesce((SELECT sum(temporary_bytes) FROM assets WHERE owner_id=capacity.owner_id),0),"
+            "text_file_bytes=coalesce((SELECT sum(text_file_bytes) FROM assets WHERE owner_id=capacity.owner_id),0),"
+            "media_budget_bytes=coalesce((SELECT sum(reserved_bytes) FROM jobs WHERE owner_id=capacity.owner_id),0)+"
+            "coalesce((SELECT sum(size_bytes) FROM uploads WHERE owner_id=capacity.owner_id AND job_id IS NULL),0)")
         def trigger(name: str, when: str, body: str) -> None:
             db.execute(f"CREATE TRIGGER IF NOT EXISTS {name} {when} BEGIN {body} END")
         trigger("jobs_summary_insert", "AFTER INSERT ON jobs", f"UPDATE jobs SET summary={_summary_sql('new.payload')} WHERE id=new.id;")
         trigger("jobs_summary_update", "AFTER UPDATE OF payload,status ON jobs", f"UPDATE jobs SET summary={_summary_sql('new.payload')},revision=old.revision+1 WHERE id=new.id;")
-        trigger("jobs_capacity_insert", "AFTER INSERT ON jobs", "INSERT INTO capacity(owner_id,logical_bytes) VALUES(new.owner_id,new.reserved_bytes+length(CAST(new.payload AS BLOB))) ON CONFLICT(owner_id) DO UPDATE SET logical_bytes=logical_bytes+excluded.logical_bytes;")
-        trigger("jobs_capacity_update", "AFTER UPDATE OF payload,reserved_bytes ON jobs", "UPDATE capacity SET logical_bytes=logical_bytes+new.reserved_bytes-old.reserved_bytes+length(CAST(new.payload AS BLOB))-length(CAST(old.payload AS BLOB)) WHERE owner_id=new.owner_id;")
-        trigger("jobs_capacity_delete", "AFTER DELETE ON jobs", "UPDATE capacity SET logical_bytes=logical_bytes-old.reserved_bytes-length(CAST(old.payload AS BLOB)) WHERE owner_id=old.owner_id;")
-        trigger("uploads_capacity_insert", "AFTER INSERT ON uploads", "INSERT INTO capacity(owner_id,logical_bytes) VALUES(new.owner_id,CASE WHEN new.job_id IS NULL THEN new.size_bytes ELSE 0 END) ON CONFLICT(owner_id) DO UPDATE SET logical_bytes=logical_bytes+excluded.logical_bytes;")
-        trigger("uploads_capacity_update", "AFTER UPDATE OF size_bytes,job_id ON uploads", "UPDATE capacity SET logical_bytes=logical_bytes+(CASE WHEN new.job_id IS NULL THEN new.size_bytes ELSE 0 END)-(CASE WHEN old.job_id IS NULL THEN old.size_bytes ELSE 0 END) WHERE owner_id=new.owner_id;")
-        trigger("uploads_capacity_delete", "AFTER DELETE ON uploads", "UPDATE capacity SET logical_bytes=logical_bytes-(CASE WHEN old.job_id IS NULL THEN old.size_bytes ELSE 0 END) WHERE owner_id=old.owner_id;")
+        trigger("jobs_capacity_insert", "AFTER INSERT ON jobs", "INSERT INTO capacity(owner_id,logical_bytes,media_budget_bytes) VALUES(new.owner_id,new.reserved_bytes+length(CAST(new.payload AS BLOB)),new.reserved_bytes) ON CONFLICT(owner_id) DO UPDATE SET logical_bytes=logical_bytes+excluded.logical_bytes,media_budget_bytes=media_budget_bytes+excluded.media_budget_bytes;")
+        trigger("jobs_capacity_update", "AFTER UPDATE OF payload,reserved_bytes ON jobs", "UPDATE capacity SET logical_bytes=logical_bytes+new.reserved_bytes-old.reserved_bytes+length(CAST(new.payload AS BLOB))-length(CAST(old.payload AS BLOB)),media_budget_bytes=media_budget_bytes+new.reserved_bytes-old.reserved_bytes WHERE owner_id=new.owner_id;")
+        trigger("jobs_capacity_delete", "AFTER DELETE ON jobs", "UPDATE capacity SET logical_bytes=logical_bytes-old.reserved_bytes-length(CAST(old.payload AS BLOB)),media_budget_bytes=media_budget_bytes-old.reserved_bytes WHERE owner_id=old.owner_id;")
+        trigger("uploads_capacity_insert", "AFTER INSERT ON uploads", "INSERT INTO capacity(owner_id,logical_bytes,media_budget_bytes) VALUES(new.owner_id,CASE WHEN new.job_id IS NULL THEN new.size_bytes ELSE 0 END,CASE WHEN new.job_id IS NULL THEN new.size_bytes ELSE 0 END) ON CONFLICT(owner_id) DO UPDATE SET logical_bytes=logical_bytes+excluded.logical_bytes,media_budget_bytes=media_budget_bytes+excluded.media_budget_bytes;")
+        trigger("uploads_capacity_update", "AFTER UPDATE OF size_bytes,job_id ON uploads", "UPDATE capacity SET logical_bytes=logical_bytes+(CASE WHEN new.job_id IS NULL THEN new.size_bytes ELSE 0 END)-(CASE WHEN old.job_id IS NULL THEN old.size_bytes ELSE 0 END),media_budget_bytes=media_budget_bytes+(CASE WHEN new.job_id IS NULL THEN new.size_bytes ELSE 0 END)-(CASE WHEN old.job_id IS NULL THEN old.size_bytes ELSE 0 END) WHERE owner_id=new.owner_id;")
+        trigger("uploads_capacity_delete", "AFTER DELETE ON uploads", "UPDATE capacity SET logical_bytes=logical_bytes-(CASE WHEN old.job_id IS NULL THEN old.size_bytes ELSE 0 END),media_budget_bytes=media_budget_bytes-(CASE WHEN old.job_id IS NULL THEN old.size_bytes ELSE 0 END) WHERE owner_id=old.owner_id;")
         trigger("versions_capacity_insert", "AFTER INSERT ON versions", "UPDATE capacity SET logical_bytes=logical_bytes+length(CAST(new.payload AS BLOB)) WHERE owner_id=(SELECT owner_id FROM jobs WHERE id=new.job_id);")
         trigger("versions_capacity_delete", "AFTER DELETE ON versions", "UPDATE capacity SET logical_bytes=logical_bytes-length(CAST(old.payload AS BLOB)) WHERE owner_id=(SELECT owner_id FROM jobs WHERE id=old.job_id);")
         trigger("versions_capacity_update", "AFTER UPDATE OF payload ON versions", "UPDATE capacity SET logical_bytes=logical_bytes+length(CAST(new.payload AS BLOB))-length(CAST(old.payload AS BLOB)) WHERE owner_id=(SELECT owner_id FROM jobs WHERE id=new.job_id);")
@@ -158,12 +181,6 @@ class WorkbenchStore:
         trigger("legacy_capacity_insert", "AFTER INSERT ON legacy_job_payloads", "INSERT INTO capacity(owner_id,logical_bytes) VALUES(new.owner_id,length(CAST(new.payload AS BLOB))) ON CONFLICT(owner_id) DO UPDATE SET logical_bytes=logical_bytes+excluded.logical_bytes;")
         trigger("legacy_capacity_delete", "AFTER DELETE ON legacy_job_payloads", "UPDATE capacity SET logical_bytes=logical_bytes-length(CAST(old.payload AS BLOB)) WHERE owner_id=old.owner_id;")
         trigger("jobs_owned_data_delete", "BEFORE DELETE ON jobs", "DELETE FROM versions WHERE job_id=old.id; DELETE FROM job_chunks WHERE job_id=old.id; DELETE FROM legacy_job_payloads WHERE job_id=old.id;")
-        for (job_id,) in db.execute("SELECT id FROM jobs").fetchall():
-            row = db.execute("SELECT owner_id,payload FROM jobs WHERE id=?", (job_id,)).fetchone()
-            original = json.loads(row[1])
-            db.execute("INSERT OR IGNORE INTO legacy_job_payloads VALUES(?,?,?)", (job_id, row[0], row[1]))
-            compact = self._compact(db, original)
-            db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(compact, ensure_ascii=False), job_id))
         # REPLACE must fire delete triggers, including historical version updates.
         db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
@@ -363,9 +380,15 @@ class WorkbenchStore:
     def save_job(self, job: dict[str, Any], reserved_bytes: int | None = None) -> None:
         with self.connection() as db:
             compact = self._compact(db, job)
-            db.execute("UPDATE jobs SET status=?,payload=? WHERE id=?", (job["status"], json.dumps(compact, ensure_ascii=False), job["id"]))
+            changed = db.execute("UPDATE jobs SET status=?,payload=? WHERE id=?", (job["status"], json.dumps(compact, ensure_ascii=False), job["id"]))
+            if changed.rowcount == 0:
+                raise AsrError(404, "job_not_found", "workbench job not found")
             if reserved_bytes is not None:
                 db.execute("UPDATE jobs SET reserved_bytes=? WHERE id=?", (reserved_bytes, job["id"]))
+            sizes = job.get("retained_file_bytes")
+            if isinstance(sizes, dict):
+                temporary, text = self.file_categories(sizes)
+                self._set_physical_usage(db, job["id"], job["owner_id"], sum(int(value) for value in sizes.values()), temporary, text)
 
     def save_version(self, job: dict[str, Any]) -> None:
         self.save_job(job)
@@ -393,12 +416,29 @@ class WorkbenchStore:
             raise AsrError(404, "version_not_found", "transcript version not found")
         return cast(dict[str, Any], json.loads(row["payload"]))
 
-    def usage(self, owner_id: str | None = None) -> int:
+    def storage_usage(self, owner_id: str | None = None) -> dict[str, int]:
+        """Read the ledger only; filesystem repair is a separate maintenance task."""
         clause = " WHERE owner_id=?" if owner_id is not None else ""
         args = (owner_id,) if owner_id is not None else ()
         with self.connection() as db:
-            result = db.execute("SELECT coalesce(sum(logical_bytes),0) FROM capacity" + clause, args).fetchone()[0]
-        return int(result)
+            row = db.execute("SELECT coalesce(sum(logical_bytes-media_budget_bytes),0),"
+                             "coalesce(sum(physical_bytes),0),coalesce(sum(temporary_bytes),0),"
+                             "coalesce(sum(text_file_bytes),0) FROM capacity" + clause, args).fetchone()
+            job_clause = " AND j.owner_id=?" if owner_id is not None else ""
+            upload_clause = " AND owner_id=?" if owner_id is not None else ""
+            pending_jobs = db.execute("SELECT coalesce(sum(max(j.reserved_bytes-coalesce(a.physical_bytes,0),0)),0) "
+                                      "FROM jobs j LEFT JOIN assets a ON a.asset_id=j.id WHERE 1=1" + job_clause, args).fetchone()[0]
+            pending_uploads = db.execute("SELECT coalesce(sum(max(size_bytes-offset,0)),0) FROM uploads WHERE job_id IS NULL" + upload_clause, args).fetchone()[0]
+        sql_text, physical, temporary, text_files = (max(0, int(value)) for value in row)
+        reserved = int(pending_jobs) + int(pending_uploads)
+        text = sql_text + text_files
+        saved = max(0, physical-temporary-text_files)
+        used = saved + text + temporary
+        return {"saved_bytes": saved, "text_bytes": text, "temporary_bytes": temporary,
+                "reserved_bytes": reserved, "used_bytes": used, "allocated_bytes": used + reserved}
+
+    def usage(self, owner_id: str | None = None) -> int:
+        return self.storage_usage(owner_id)["allocated_bytes"]
 
     def physical_usage(self, owner_id: str | None = None) -> int:
         with self.connection() as db:
@@ -413,18 +453,41 @@ class WorkbenchStore:
         return {**{"upload:" + str(row[0]): int(row[1]) for row in uploads},
                 **{"job:" + str(row[0]): int(row[1]) for row in jobs}}
 
-    def set_physical_usage(self, asset_id: str, owner_id: str, physical_bytes: int) -> None:
-        """Record each physical asset once; transfer its ID for hardlink ownership."""
+    @staticmethod
+    def file_categories(sizes: dict[str, Any]) -> tuple[int, int]:
+        temporary = text = 0
+        for name, raw_size in sizes.items():
+            size = max(0, int(raw_size))
+            path = Path(name)
+            if (path.parts and path.parts[0] in {"work", "operation", "operations", "temporary", "pcm"}) or ".partial" in path.name or path.suffix == ".wav":
+                temporary += size
+            elif path.suffix == ".json" or (path.parts and path.parts[0] in {"checkpoint", "checkpoints"}):
+                text += size
+        return temporary, text
+
+    @staticmethod
+    def _set_physical_usage(db: sqlite3.Connection, asset_id: str, owner_id: str,
+                            physical_bytes: int, temporary_bytes: int, text_file_bytes: int) -> None:
+        physical = max(0, physical_bytes)
+        temporary = min(physical, max(0, temporary_bytes))
+        text = min(physical-temporary, max(0, text_file_bytes))
+        old = db.execute("SELECT owner_id,physical_bytes,temporary_bytes,text_file_bytes FROM assets WHERE asset_id=?", (asset_id,)).fetchone()
+        if old:
+            db.execute("UPDATE capacity SET physical_bytes=physical_bytes-?,temporary_bytes=temporary_bytes-?,text_file_bytes=text_file_bytes-? WHERE owner_id=?",
+                       (old["physical_bytes"], old["temporary_bytes"], old["text_file_bytes"], old["owner_id"]))
+        db.execute("INSERT OR IGNORE INTO capacity(owner_id) VALUES(?)", (owner_id,))
+        if physical:
+            db.execute("INSERT INTO assets(asset_id,owner_id,physical_bytes,temporary_bytes,text_file_bytes) VALUES(?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET owner_id=excluded.owner_id,physical_bytes=excluded.physical_bytes,temporary_bytes=excluded.temporary_bytes,text_file_bytes=excluded.text_file_bytes",
+                       (asset_id, owner_id, physical, temporary, text))
+            db.execute("UPDATE capacity SET physical_bytes=physical_bytes+?,temporary_bytes=temporary_bytes+?,text_file_bytes=text_file_bytes+? WHERE owner_id=?", (physical, temporary, text, owner_id))
+        else:
+            db.execute("DELETE FROM assets WHERE asset_id=?", (asset_id,))
+
+    def set_physical_usage(self, asset_id: str, owner_id: str, physical_bytes: int, *,
+                           temporary_bytes: int = 0, text_file_bytes: int = 0) -> None:
+        """Record materialized bytes once; categories partition the same bytes."""
         with self.connection() as db:
-            old = db.execute("SELECT owner_id,physical_bytes FROM assets WHERE asset_id=?", (asset_id,)).fetchone()
-            if old:
-                db.execute("UPDATE capacity SET physical_bytes=physical_bytes-? WHERE owner_id=?", (old["physical_bytes"], old["owner_id"]))
-            db.execute("INSERT OR IGNORE INTO capacity(owner_id) VALUES(?)", (owner_id,))
-            if physical_bytes:
-                db.execute("INSERT INTO assets VALUES(?,?,?) ON CONFLICT(asset_id) DO UPDATE SET owner_id=excluded.owner_id,physical_bytes=excluded.physical_bytes", (asset_id, owner_id, max(0, physical_bytes)))
-                db.execute("UPDATE capacity SET physical_bytes=physical_bytes+? WHERE owner_id=?", (max(0, physical_bytes), owner_id))
-            else:
-                db.execute("DELETE FROM assets WHERE asset_id=?", (asset_id,))
+            self._set_physical_usage(db, asset_id, owner_id, physical_bytes, temporary_bytes, text_file_bytes)
 
     def glossary(self) -> dict[str, Any]:
         with self.connection() as db:

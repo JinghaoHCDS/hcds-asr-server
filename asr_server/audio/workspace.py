@@ -254,10 +254,18 @@ class WorkspaceManager:
             handoffs = self._persistent_handoffs[device]
             original, transferred = handoffs[key]
             declarations = self._persistent_disk_bytes[device]
-            if declarations.get(key, 0) < transferred + size_bytes:
+            promised = declarations.get(key, 0)
+            # Materialized bytes have already left the database promise. The
+            # next transfer needs only the lease's still-unwritten bytes and
+            # its growth, rather than the original lease's full allocation.
+            if promised < lease.pending_bytes + size_bytes:
                 raise RuntimeError("persistent growth was not admitted")
             previous = self._persistent_totals[device]
-            handoffs[key] = (original + size_bytes, transferred + size_bytes)
+            materialized = lease.size_bytes - lease.pending_bytes
+            # Rebase on the current promise: growth may consume an existing
+            # spare reservation or newly admitted bytes. Both must leave the
+            # cached physical reservation equal to the outstanding promise.
+            handoffs[key] = (promised + materialized, lease.size_bytes + size_bytes)
             self._persistent_totals[device] = self._persistent_total(device, declarations)
             try:
                 self._check_shared_budget(size_bytes, lease.root)

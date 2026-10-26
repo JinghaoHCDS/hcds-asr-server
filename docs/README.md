@@ -6,6 +6,7 @@
 
 - [官方 hcds-lan-asr Skill](../skills/hcds-lan-asr/SKILL.md)：部署后通过 `/skill` 读取同一份 Agent 用法，`/skill/hcds-lan-asr.zip` 下载完整指南及批量客户端；确切接口和运行时能力分别读取 `/openapi.json`、`/v1/models`。
 - [局域网工作台与 Qwen 质量流程](product-workbench.md)：账号、断点上传、七天任务保留、长文搜索与跳转、回听改字及字幕导出。
+- [工作台高质量音频与存储执行方案](workbench-audio-storage-plan.md)：待实施的 192 kbps MP3 保留、临时识别音频回收、容量展示和旧任务清理方案。
 - [已接入模型的推理实践](asr-model-practices.md)：Qwen 官方 native helpers、音频规范化、生成预算、ForcedAligner 和 MOSS SDPA 的代码与官方来源对照。
 - [Qwen 质量评测](../evaluation/README.md)：开发/验收集、切分候选对照、CER/术语/字幕门槛。
 - [WSL 部署](wsl-deployment.md)：Windows / NVIDIA / WSL 前提、首次 GPU 验收、systemd、Windows 启动与局域网访问。
@@ -57,3 +58,5 @@
 - [日志与诊断](asr-diagnostics.md)
 - [新增 ASR 引擎](adding-asr-engine.md)
 - [测试精简去向](asr-platform-test-map.md)
+
+- [工作台 MP3 与存储验收（2026-10-26）](validation-2026-10-26-workbench-audio.md)

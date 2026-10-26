@@ -1,6 +1,9 @@
 import secrets
+import shutil
 from typing import Annotated, Any
 from urllib.parse import quote
+
+from starlette.types import Scope, Receive, Send
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Request, Response
 from fastapi.responses import FileResponse
@@ -30,6 +33,10 @@ class CompleteUpload(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=200)
     model: str | None = Field(default=None, max_length=160)
     quality_profile: str | None = Field(default=None, max_length=80)
+
+
+class RetryJob(BaseModel):
+    from_start: bool = False
 
 
 class EditSegment(BaseModel):
@@ -115,6 +122,15 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
             "storage": {"used_bytes": await service.store.run(service.store.usage, user["id"]), "quota_bytes": settings.workbench_user_quota_bytes},
         }
 
+    async def storage_data(owner: str | None = None) -> dict[str, Any]:
+        usage = await service.store.run(service.store.storage_usage, owner)
+        quota = settings.workbench_user_quota_bytes if owner is not None else settings.workbench_total_quota_bytes
+        return {**usage, "quota_bytes": quota, "available_bytes": max(0, quota - usage["allocated_bytes"])}
+
+    @router.get("/storage")
+    async def storage(user: User) -> dict[str, Any]:
+        return await storage_data(user["id"])
+
     @router.post("/uploads", status_code=201)
     async def create_upload(data: NewUpload, user: User) -> dict[str, Any]:
         return await service.create_upload(user["id"], data.filename, data.size_bytes)
@@ -185,8 +201,8 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
         return await service.cancel(user["id"], job_id)
 
     @router.post("/jobs/{job_id}/retry", status_code=202)
-    async def retry(job_id: str, user: User) -> dict[str, Any]:
-        return await service.retry(user["id"], job_id)
+    async def retry(job_id: str, user: User, data: RetryJob | None = None) -> dict[str, Any]:
+        return await service.retry(user["id"], job_id, from_start=data.from_start if data else False)
 
     @router.delete("/jobs/{job_id}")
     async def delete(job_id: str, user: User) -> Response:
@@ -195,11 +211,14 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
 
     @router.get("/jobs/{job_id}/audio")
     async def audio(job_id: str, user: User) -> FileResponse:
-        await service.store.run(service.store.job_revision, job_id, user["id"])
-        path = service.job_dir(job_id) / "audio.wav"
-        if not path.exists():
-            raise AsrError(409, "audio_not_ready", "audio extraction has not completed")
-        return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+        path = await service.acquire_playback(user["id"], job_id)
+        class PlaybackResponse(FileResponse):
+            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+                try:
+                    await super().__call__(scope, receive, send)
+                finally:
+                    await service.release_playback(job_id)
+        return PlaybackResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
     @router.patch("/jobs/{job_id}/segments/{segment_id}")
     async def edit(job_id: str, segment_id: str, data: EditSegment, user: User) -> dict[str, Any]:
@@ -264,7 +283,7 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
                 "queue_position": app.state.job_manager.external_queue_position(task["id"]),
                 "completed_chunks": progress.get("completed_chunks"), "total_chunks": progress.get("total_chunks"),
                 "error_code": (task.get("error") or {}).get("code")})
-        return {"storage": {"used_bytes": await service.store.run(service.store.usage), "quota_bytes": settings.workbench_total_quota_bytes},
+        return {"storage": {**(await storage_data()), "disk_free_bytes": (await service.store.run(shutil.disk_usage, service.store.root)).free},
                 "queue": queue, "queue_has_more": values["next_cursor"] is not None,
                 "users_count": len(await service.store.run(service.store.users)),
                 "logging": log_stats()}

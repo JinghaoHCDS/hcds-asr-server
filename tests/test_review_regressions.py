@@ -72,7 +72,7 @@ async def test_preparation_cancellation_finishes_after_decoder_cleanup(
             job = await service.store.run(service.store.job, job_id)
             assert job['status'] == 'cancelled' and job['expires_at']
             assert not (service.job_dir(job_id) / 'audio.partial.wav').exists()
-            assert (service.job_dir(job_id) / 'source').exists()  # retry remains possible
+            assert (service.job_dir(job_id) / 'audio.mp3').exists()  # retry reconstructs PCM
         assert not service.active and not service.prepared_assets and not service.preparation_errors
         assert service.app.state.workspace_manager._reserved_upload_bytes == 0
         assert service.app.state.workspace_manager.pending_disk_bytes(service.store.root) == 0
@@ -113,7 +113,7 @@ async def test_durable_backlog_refills_before_new_admission(tmp_path: Path, monk
         assert (await service.store.run(service.store.job, job_id))['status'] == 'completed'
 
 
-async def test_vbr_estimate_does_not_limit_actual_pcm(tmp_path: Path) -> None:
+async def test_vbr_estimate_does_not_limit_actual_pcm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     if not shutil.which('ffmpeg'):
         pytest.skip('ffmpeg required')
     parts = []
@@ -122,11 +122,17 @@ async def test_vbr_estimate_does_not_limit_actual_pcm(tmp_path: Path) -> None:
         subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f'sine=frequency=440:duration={seconds}',
                         '-c:a', 'libmp3lame', '-b:a', rate, '-write_xing', '0', str(path)], check=True)
         parts.append(path.read_bytes())
-    content = b''.join(parts)
+    # Decode the concatenated stream once into a valid, tag-consistent VBR asset.
+    joined = tmp_path / 'joined.mp3'
+    joined.write_bytes(b''.join(parts))
     source = tmp_path / 'vbr.mp3'
-    source.write_bytes(content)
+    subprocess.run(['ffmpeg', '-v', 'quiet', '-i', str(joined), '-c:a', 'libmp3lame', '-q:a', '5', str(source)], check=True)
+    content = source.read_bytes()
     estimate = await MediaPreprocessor().probe(source)
-    assert estimate is not None and estimate < 20
+    assert estimate is not None
+    async def underestimate(*args: Any, **kwargs: Any) -> float:
+        return 16.0
+    monkeypatch.setattr('asr_server.workbench.service.probe_audio_duration_path_async', underestimate)
     async with running(tmp_path) as service:
         job_id = await submit(service, content)
         operation = service.app.state.job_manager.scheduler.operations[job_id]
@@ -142,9 +148,8 @@ async def test_pcm_growth_obeys_persistent_quota(tmp_path: Path, monkeypatch: py
     async def underestimate(*args: Any, **kwargs: Any) -> float:
         return .01
     monkeypatch.setattr('asr_server.workbench.service.probe_audio_duration_path_async', underestimate)
-    async with running(tmp_path, workbench_user_quota_bytes=12_800_000) as service:
-        # Worker slice reserves ~10.7 MB; growing PCM for this input exceeds the
-        # owner's quota before that extra block can be written.
+    async with running(tmp_path, workbench_user_quota_bytes=4_700_000) as service:
+        # Saving the MP3 fits; adding PCM plus the worker slice exceeds the quota.
         job_id = await submit(service, make_wav(45))
         operation = service.app.state.job_manager.scheduler.operations[job_id]
         await asyncio.wait_for(asyncio.shield(operation.future), 5)
@@ -169,7 +174,9 @@ async def test_fresh_asset_is_borrowed_without_pcm_rescan(tmp_path: Path, monkey
         assert not scans
         job = await service.store.run(service.store.job, job_id)
         assert job['status'] == 'completed'
-        path = service.job_dir(job_id) / 'audio.wav'
+        assert not (service.job_dir(job_id) / 'operation').exists()
+        asset = await service.prepare_audio(job_id)
+        path = asset.path
         asset = NormalizedAudioAsset.from_metadata(path, job['normalized_asset'])
         assert scans == [path]  # recovery still verifies PCM contents
         asset.validate()
@@ -178,6 +185,7 @@ async def test_fresh_asset_is_borrowed_without_pcm_rescan(tmp_path: Path, monkey
         with pytest.raises(AsrError) as invalid:
             asset.validate()
         assert invalid.value.code == 'normalized_asset_invalid'
+        await service.cleanup_operation(job_id)
 
 
 @pytest.mark.parametrize('format_', ['srt', 'vtt'])

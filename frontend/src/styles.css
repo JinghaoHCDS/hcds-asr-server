@@ -144,6 +144,10 @@ small { font-size: 12px; }
 .storage-meter { padding: 24px 8px; }
 .storage-meter > div:first-child { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; font-size: 11px; }
 .storage-meter strong { font-weight: 500; }.storage-meter small { font-size: 10px; color: var(--muted); }
+.storage-breakdown { margin: 14px 0 0; font-size: 11px; }
+.storage-breakdown > div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; }
+.storage-breakdown dt { color: var(--muted); }.storage-breakdown dd { margin: 0; white-space: nowrap; }
+.upload-audio-policy { margin-top: 14px; }
 .progress-track { height: 4px; border-radius: 4px; background: var(--soft); overflow: hidden; }
 .progress-track > span, .progress-track > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
 .upload-files { max-height: 260px; overflow: auto; margin-top: 20px; }
@@ -177,6 +181,8 @@ small { font-size: 12px; }
 .audio-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .audio-heading > div:nth-child(2) { flex: 1; min-width: 0; }.audio-heading h2 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.audio-heading p { color: var(--muted); font-size: 11px; margin-top: 2px; }.audio-heading .file-icon { background: var(--hcds-atmosphere); height: 40px; width: 40px; }
 .audio-panel audio { display: block; width: 100%; height: 36px; }.audio-panel audio::-webkit-media-controls-panel { background: var(--hcds-mist-soft); }
+.audio-format { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 8px; font-size: 11px; color: var(--muted); }
+.audio-format strong { font-weight: 500; color: var(--ink); }
 .processing-note { display: flex; align-items: center; gap: 10px; font-size: 12px; margin-top: 12px; }.processing-note small { margin-left: auto; color: var(--muted); font-size: 11px; }
 .spinner { width: 12px; height: 12px; border: 2px solid var(--hcds-atmosphere); border-top-color: var(--ink); border-radius: 50%; animation: spin 1s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }
 .result-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) 264px; gap: 24px; margin-top: 20px; }

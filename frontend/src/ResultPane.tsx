@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, clock, date, errorNames, jobDetail, message, phaseName, terminal, type Issue, type Job, type ModelOption, type Segment } from './api';
+import { api, bytes, clock, date, errorNames, jobDetail, message, phaseName, terminal, type Issue, type Job, type ModelOption, type Segment } from './api';
 import { Icon } from './icons';
 import Transcript, { VirtualText } from './Transcript';
 import { useEntrance } from './motion';
@@ -24,6 +24,8 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
   const [position, setPosition] = useState(0); const [exportVersion, setExportVersion] = useState<number | null>(null);
   const [format, setFormat] = useState('txt'); const [exporting, setExporting] = useState(false); const [notice, setNotice] = useState('');
   const [audioError, setAudioError] = useState(false); const audio = useRef<HTMLAudioElement>(null);
+  const changed = useRef(onChanged); changed.current = onChanged;
+  const observed = useRef('');
   useEntrance(root, !!job?.result, '.audio-panel, .result-grid, .waiting-result');
   useEntrance(modal, edit?.id, '.edit-modal');
   useEntrance(root, toolsOpen, '.result-aside');
@@ -54,12 +56,17 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
       const next = await jobDetail(jobId, etag.current.id === jobId ? etag.current.value : undefined);
       if (selectedId.current !== jobId) return;
       etag.current = { id: jobId, value: next.etag };
-      if (next.job) setJob(next.job);
+      if (next.job) {
+        const signature = `${next.job.id}:${next.job.status}:${next.job.result?.alignment_status}:${next.job.audio_asset?.state}`;
+        if (observed.current && observed.current !== signature) changed.current();
+        observed.current = signature;
+        setJob(next.job);
+      }
       setError('');
     } catch (e) { if (selectedId.current === jobId) setError(message(e)); }
   }, [jobId]);
   useEffect(() => {
-    etag.current = { id: jobId }; setJob(null); setAudioError(false); void load();
+    etag.current = { id: jobId }; observed.current = ''; setJob(null); setAudioError(false); void load();
   }, [jobId, load]);
   const pending = !!job && (!terminal(job.status) || job.result?.alignment_status === 'pending');
   useEffect(() => {
@@ -75,8 +82,12 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
     return () => { alive = false; window.clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
   }, [pending, load]);
   useEffect(() => { if (job?.result?.version !== undefined) setExportVersion(job.result.version); }, [job?.result?.version]);
+  const asset = job?.audio_asset;
+  const audioReady = asset?.state === 'ready';
+  const audioSource = audioReady ? `/api/jobs/${encodeURIComponent(jobId)}/audio?v=${encodeURIComponent(asset.sha256 || String(asset.size_bytes || 'ready'))}` : undefined;
+  useEffect(() => { setAudioError(false); }, [audioSource]);
 
-  function seek(seconds: number) { setJump(previous => ({ seconds, serial: (previous?.serial ?? 0) + 1 })); setPosition(seconds); if (audio.current) { audio.current.currentTime = seconds; void audio.current.play().catch(() => setNotice('请点击播放器的播放按钮回听。')); } }
+  function seek(seconds: number) { setJump(previous => ({ seconds, serial: (previous?.serial ?? 0) + 1 })); setPosition(seconds); if (!audioReady) { setNotice('回听音频正在准备，准备完成后即可播放。'); return; } if (audio.current) { audio.current.currentTime = seconds; void audio.current.play().catch(() => setNotice('请点击播放器的播放按钮回听。')); } }
   function beginEdit(segment: Segment) { setEdit(segment); setEditBaseVersion(job?.result?.version ?? 1); setDraft(segment.text); setError(''); }
   async function save() {
     if (!edit || !job?.result || !draft.trim()) return;
@@ -115,8 +126,10 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
     {notice && <div className="banner neutral" role="status"><span>{notice}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setNotice('')}><Icon name="close" size={16} /></button></div>}
     {!job ? <div className="panel loading-panel">正在读取任务…</div> : <>
       <section className="panel audio-panel"><div className="audio-heading"><div className="file-icon"><Icon name="headphones" size={24} /></div><div><h2>{job.filename}</h2><p>{date(job.created_at)} 创建{job.expires_at ? ` · ${date(job.expires_at)} 到期` : ''}</p></div><span className={`badge ${job.status === 'completed' ? 'success' : 'processing'}`}>{phaseName(job.status)}</span></div>
-        <audio ref={audio} src={`/api/jobs/${jobId}/audio`} controls preload="metadata" onTimeUpdate={() => setPosition(audio.current?.currentTime ?? 0)} onError={() => setAudioError(true)} />
-        {audioError && <p className="footnote">原音暂不可用，可能仍在准备中。任务完成后刷新页面重试。</p>}
+        <div className="audio-format"><strong>高质量回听 · MP3 192 kbps</strong><span>{audioReady ? [asset.sample_rate ? `${asset.sample_rate / 1000} kHz` : '', asset.channels === 1 ? '单声道' : asset.channels === 2 ? '双声道' : '', asset.size_bytes !== undefined ? bytes(asset.size_bytes) : '', asset.duration_seconds !== undefined ? clock(asset.duration_seconds) : ''].filter(Boolean).join(' · ') : asset?.state === 'failed' ? '音频准备失败，重试任务可重新处理' : '正在准备回听音频，准备完成后自动可播放'}</span></div>
+        <audio ref={audio} src={audioSource} controls preload="metadata" onTimeUpdate={() => setPosition(audio.current?.currentTime ?? 0)} onLoadedMetadata={() => { setAudioError(false); if (audio.current && position > 0) audio.current.currentTime = Math.min(position, audio.current.duration || position); }} onCanPlay={() => setAudioError(false)} onError={() => { if (audioReady) setAudioError(true); }} />
+        {(asset?.source_audio_streams ?? 0) > 1 && <p className="footnote">素材包含 {asset?.source_audio_streams} 条音轨，已使用首条音轨（音轨索引 {asset?.source_stream_index ?? 0}）。</p>}
+        {audioError && <p className="footnote">回听音频暂时无法加载。<button className="text-link" onClick={() => { setAudioError(false); audio.current?.load(); }}>重新加载音频</button></p>}
         {!terminal(job.status) && <div className="processing-note"><span className="spinner" /><span>{phaseName(job.progress?.phase || job.status)}{job.progress?.total_chunks ? ` · 已完成 ${job.progress.completed_chunks ?? 0} / ${job.progress.total_chunks} 段` : job.queue_position ? ` · 前方 ${job.queue_position} 个任务` : ''}</span><small>处理完成后会自动显示结果</small></div>}
         {job.error && <p className="inline-error" role="alert">{errorNames[job.error.code] || job.error.message}</p>}
       </section>
@@ -125,7 +138,7 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
         {segments.length ? <Transcript segments={segments} raw={raw} position={position} seek={seek} onEdit={canEdit ? beginEdit : undefined} issues={issues} jump={jump} /> : <VirtualText text={(raw ? result.raw_text || result.text : result.text) || ''} />}
       </section></div><aside className="result-aside"><section className="panel export-panel"><div className="section-heading"><h3>导出结果</h3><Icon name="download" size={19} /></div><label className="field-label">文本版本<select value={exportVersion ?? result.version} onChange={e => setExportVersion(Number(e.target.value))}>{(result.versions?.length ? result.versions : [{ version: result.version, created_at: '', alignment_status: result.alignment_status }]).map(v => <option key={v.version} value={v.version}>v{v.version}{v.version === result.version ? ' · 当前版本' : ''}{v.alignment_status === 'pending' ? ' · 字幕更新中' : ''}</option>)}</select></label><label className="field-label">文件格式<select value={format} onChange={e => setFormat(e.target.value)}><option value="txt">TXT · 纯文本</option>{canSubtitle && <><option value="srt">SRT · 字幕</option><option value="vtt">VTT · 网页字幕</option></>}<option value="json">JSON · 完整结果</option></select></label><button className="button primary wide" disabled={exporting || subtitleBlocked} onClick={() => void download()}><Icon name="download" size={17} />{exporting ? '正在导出…' : '下载所选版本'}</button>{subtitleBlocked && <p className="footnote">{versionStatus === 'failed' ? '此版本字幕对齐失败，可先导出文字或选择此前已对齐的版本。' : '字幕正在更新，可先导出文字或选择此前已对齐的版本。'}</p>}<p className="footnote">导出使用所选版本的交付稿。模型原稿可在左侧查看、复制，也保留在完整 JSON 中。</p></section>
         {result.alignment_status !== 'aligned' && !segmentTimed && <div className="banner neutral"><Icon name="refresh" size={18} /><span>{result.alignment_status === 'pending' ? '字幕更新中' : '字幕暂未完成对齐'}</span></div>}
-        <section className="panel review-panel"><div className="section-heading"><h3>回听清单</h3><span className="count">{issues.length}</span></div>{issues.length === 0 ? <p className="muted">系统未标记待复核问题。你仍可以回听原音进行校对。</p> : <div className="issue-list">{issues.slice(issuePage * 20, (issuePage + 1) * 20).map((issue, i) => <button className="issue-item" key={i} onClick={() => seek(typeof issue !== 'string' ? issue.start ?? 0 : 0)}><Icon name="alert" size={17} /><span><strong>{typeof issue !== 'string' && issue.start !== undefined ? clock(issue.start) : '需要确认'}</strong><small>{issueText(issue)}</small></span><Icon name="play" size={12} /></button>)}</div>}{issues.length > 20 && <Pager page={issuePage} count={issues.length} setPage={setIssuePage} />}</section>
+        <section className="panel review-panel"><div className="section-heading"><h3>回听清单</h3><span className="count">{issues.length}</span></div>{issues.length === 0 ? <p className="muted">系统未标记待复核问题。你仍可以回听音频进行校对。</p> : <div className="issue-list">{issues.slice(issuePage * 20, (issuePage + 1) * 20).map((issue, i) => <button className="issue-item" key={i} onClick={() => seek(typeof issue !== 'string' ? issue.start ?? 0 : 0)}><Icon name="alert" size={17} /><span><strong>{typeof issue !== 'string' && issue.start !== undefined ? clock(issue.start) : '需要确认'}</strong><small>{issueText(issue)}</small></span><Icon name="play" size={12} /></button>)}</div>}{issues.length > 20 && <Pager page={issuePage} count={issues.length} setPage={setIssuePage} />}</section>
         {!!result.changes?.length && <section className="panel"><h3>词汇与修改记录</h3><p className="muted">已记录 {result.changes.length} 项调整，原始识别稿保持可对照。</p><div className="changes-list">{result.changes.slice(changePage * 20, (changePage + 1) * 20).map((change, i) => { const value = change as { before?: string; after?: string; original?: string; replacement?: string; from?: string; to?: string; source?: string }; const before = value.before ?? value.original ?? value.from; const after = value.after ?? value.replacement ?? value.to; return <div key={i}>{before && after ? <><span>{before}</span><Icon name="arrow" size={12} /><strong>{after}</strong></> : <span>第 {i + 1} 项修改已保存</span>}</div>; })}</div>{result.changes.length > 20 && <Pager page={changePage} count={result.changes.length} setPage={setChangePage} />}</section>}
       </aside></div> : <section className="panel waiting-result"><Icon name="wave" size={34} /><h3>{job.status === 'failed' ? '任务未完成' : '文字正在路上'}</h3><p>{job.status === 'failed' ? '已有处理进度会保留。返回任务列表查看错误或重试。' : '任务完成后，回听、校对和导出工具会显示在这里。'}</p>{job.progress?.text && <div className="partial-text"><strong>已完成片段的临时文字</strong><VirtualText text={job.progress.text} /></div>}</section>}
     </>}
