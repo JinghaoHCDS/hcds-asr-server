@@ -971,5 +971,16 @@
   "two_tasks_gap_free_acceptance": {
     "validated": false,
     "reason": "four audio intervals require listening; sound type unclassified, omitted words not confirmed"
+  },
+  "release_acceptance": {
+    "approved_on": "2026-10-26 Asia/Shanghai",
+    "approved_by": "user",
+    "current_workflow_accepted": true,
+    "approved_for_deployment_and_remote_push": true,
+    "retained_audio_review_markers": 4,
+    "audio_review_markers_block_release": false,
+    "audio_content_classification_required_for_release": false,
+    "backend_completeness_unchanged": true,
+    "unperformed_quality_acceptance_unchanged": true
   }
 }
