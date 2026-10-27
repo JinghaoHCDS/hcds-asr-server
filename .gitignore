@@ -29,6 +29,10 @@ frontend/dist/
 # Deployment-specific client config is generated in Skill downloads.
 /skills/hcds-lan-asr/server.json
 
+# Project-local third-party agent skills and installer lock.
+/.agents/skills/
+/skills-lock.json
+
 # Editor
 .idea/
 .vscode/
