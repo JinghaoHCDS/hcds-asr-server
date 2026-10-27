@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, bytes, date, errorNames, message, phaseName, retryFromStart, retryLabel, canRetry, progressText, jobStatusLabel, terminal, type Capabilities, type Job, type JobPage, type StorageUsage, type User } from './api';
+import { api, bytes, date, errorNames, message, phaseName, retryFromStart, retryLabel, canRetry, progressText, jobStatusLabel, completeness, terminal, type Capabilities, type Job, type JobPage, type StorageUsage, type User } from './api';
 import { Icon, type IconName } from './icons';
 import UploadPane from './UploadPane';
 import ResultPane from './ResultPane';
@@ -15,6 +15,9 @@ export default function App() {
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [storage, setStorage] = useState<StorageUsage | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobsState, setJobsState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [storageError, setStorageError] = useState('');
+  const [capsError, setCapsError] = useState('');
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -33,7 +36,7 @@ export default function App() {
 
   useEffect(() => {
     api<{ user: User }>('/auth/me', {}, true).then(v => setUser(v.user)).catch(() => {}).finally(() => setReady(true));
-    const unauth = () => { setUser(null); setCaps(null); setStorage(null); setJobs([]); setActiveId(null); setError('登录已失效，请重新登录。'); };
+    const unauth = () => { setUser(null); setCaps(null); setStorage(null); setJobs([]); setJobsState('loading'); setStorageError(''); setCapsError(''); setActiveId(null); setError('登录已失效，请重新登录。'); };
     window.addEventListener('asr:unauthorized', unauth);
     return () => window.removeEventListener('asr:unauthorized', unauth);
   }, []);
@@ -42,6 +45,7 @@ export default function App() {
     if (!currentUser.current) return;
     if (storagePolling.current) { storageDirty.current = true; return; }
     storagePolling.current = true;
+    const storageUser = currentUser.current?.id;
     try {
       do {
         storageDirty.current = false;
@@ -51,9 +55,9 @@ export default function App() {
           if (!currentUser.current) return;
           storageDirty.current = true; continue;
         }
-        setStorage(value);
+        setStorage(value); setStorageError('');
       } while (storageDirty.current);
-    } catch { /* The next operation or visibility refresh retries this lightweight request. */ }
+    } catch (e) { if (currentUser.current?.id === storageUser) setStorageError(message(e)); }
     finally { storagePolling.current = false; }
   }, []);
 
@@ -66,15 +70,16 @@ export default function App() {
       if (currentUser.current?.id !== expectedUser) return;
       setJobs(data.jobs);
       setNextCursor(data.next_cursor);
+      setJobsState('ready');
       setError('');
-    } catch (e) { setError(message(e)); }
+    } catch (e) { setJobsState('error'); setError(message(e)); }
     finally { polling.current = false; }
   }, []);
 
   useEffect(() => {
     if (!user) return;
     let alive = true;
-    api<Capabilities>('/capabilities').then(value => { if (alive) setCaps(value); }).catch(e => { if (alive) setError(message(e)); });
+    api<Capabilities>('/capabilities').then(value => { if (alive) { setCaps(value); setCapsError(''); } }).catch(e => { if (alive) { setCapsError(message(e)); setError(message(e)); } });
     void refresh();
     void refreshStorage();
     let timer: number;
@@ -135,38 +140,38 @@ export default function App() {
   }
 
   async function logout() {
-    try { await api('/auth/logout', { method: 'POST' }); setUser(null); setJobs([]); setCaps(null); setStorage(null); setPage('upload'); }
+    try { await api('/auth/logout', { method: 'POST' }); setUser(null); setJobs([]); setCaps(null); setStorage(null); setJobsState('loading'); setStorageError(''); setCapsError(''); setPage('upload'); }
     catch (e) { setError(message(e)); }
   }
 
-  if (!ready) return <div className="boot"><div className="brand-mark"><Icon name="wave" size={28} /></div><p>正在连接工作台…</p></div>;
+  if (!ready) return <div className="boot" role="status" aria-busy="true"><div className="brand-mark"><Icon name="wave" size={28} /></div><p>正在连接工作台…</p></div>;
   if (!user) return <Login initialError={error} onLogin={v => { setUser(v); setError(''); }} />;
 
   const nav: { id: Page; icon: IconName; title: string }[] = [{ id: 'upload', icon: 'upload', title: '新建转录' }, { id: 'jobs', icon: 'list', title: '我的任务' }, ...(user.is_admin ? [{ id: 'admin' as Page, icon: 'settings' as IconName, title: '管理工作台' }] : [])];
   const running = jobs.filter(j => !terminal(j.status)).length;
   const selected = jobs.find(j => j.id === activeId);
   const titles: Record<Page, [string, string]> = {
-    upload: ['让声音，成为可用的文字。', '上传素材，剩下的交给工作台。'], jobs: ['每一段声音，都有迹可循。', '查看处理进度，回到你的转录结果。'],
-    result: ['回听、校对，然后交付。', selected?.filename || '转录结果'], admin: ['管理工作台', '维护账户、词库和共享资源。'],
+    upload: ['新建转录', '添加音频或视频，确认设置后开始转录。'], jobs: ['我的任务', '查看处理进度，回听、校对并导出结果。'],
+    result: ['转录结果', selected?.filename || '转录结果'], admin: ['管理工作台', '维护账户、词库和共享资源。'],
   };
 
   return <div ref={shell} className={`app-shell ${page === 'result' ? 'is-result' : ''}`}>
     <aside className="sidebar">
       <a href="#upload" className="brand" onClick={e => { e.preventDefault(); setPage('upload'); }}><span className="brand-mark"><Icon name="wave" size={25} /></span><span>声笺<small>ASR WORKSPACE</small></span></a>
       <div className="workspace-label">我的工作空间</div>
-      <nav aria-label="主导航">{nav.map(n => <button key={n.id} aria-current={page === n.id || (page === 'result' && n.id === 'jobs') ? 'page' : undefined} className={`nav-item ${(page === n.id || (page === 'result' && n.id === 'jobs')) ? 'active' : ''}`} onClick={() => setPage(n.id)}><Icon name={n.icon} /><span>{n.title}</span>{n.id === 'jobs' && running > 0 && <b className="nav-count">{running}</b>}</button>)}</nav>
-      <div className="sidebar-foot"><div className="local-note"><span className="status-dot" />局域网工作台<small>音频与结果在本地服务器处理</small></div><div className="user-row"><span className="avatar">{user.username.slice(0, 1).toUpperCase()}</span><span className="user-name">{user.username}<small>{user.is_admin ? '管理员' : '个人空间'}</small></span><button className="icon-button" aria-label="退出登录" title="退出登录" onClick={() => void logout()}><Icon name="logout" size={18} /></button></div></div>
+      <nav aria-label="主导航">{nav.map(n => <button type="button" key={n.id} aria-current={page === n.id || (page === 'result' && n.id === 'jobs') ? 'page' : undefined} className={`nav-item ${(page === n.id || (page === 'result' && n.id === 'jobs')) ? 'active' : ''}`} onClick={() => setPage(n.id)}><Icon name={n.icon} /><span>{n.title}</span>{n.id === 'jobs' && running > 0 && <b className="nav-count">{running}</b>}</button>)}</nav>
+      <div className="sidebar-foot"><div className="local-note"><Icon name="wave" size={15} />局域网工作台<small>音频与结果在本地服务器处理</small></div><div className="user-row"><span className="avatar">{user.username.slice(0, 1).toUpperCase()}</span><span className="user-name">{user.username}<small>{user.is_admin ? '管理员' : '个人空间'}</small></span><button type="button" className="icon-button" aria-label="退出登录" title="退出登录" onClick={() => void logout()}><Icon name="logout" size={18} /></button></div></div>
     </aside>
     <main className="main-content">
-      <div className="topline"><span>工作空间 <span className="slash">/</span> {page === 'result' ? '转录结果' : nav.find(n => n.id === page)?.title}</span><span className="topline-right"><span className="status-dot" /> 本地转录<button className="icon-button mobile-logout" aria-label="退出登录" onClick={() => void logout()}><Icon name="logout" size={16} /></button></span></div>
-      <header className="page-header"><div><div className="eyebrow">{page === 'upload' ? 'FROM AUDIO TO WORDS' : 'YOUR AUDIO WORKSPACE'}</div><h1>{titles[page][0]}</h1><p>{titles[page][1]}</p></div>{page === 'jobs' && <button className="button primary" onClick={() => setPage('upload')}><Icon name="plus" size={18} />新建转录</button>}</header>
-      {error && <div className="banner error" role="alert"><Icon name="alert" size={18} /><span>{error}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setError('')}><Icon name="close" size={16} /></button></div>}
+      <div className="topline"><span>工作空间 <span className="slash">/</span> {page === 'result' ? '转录结果' : nav.find(n => n.id === page)?.title}</span><span className="topline-right"><Icon name="wave" size={15} /> 本地转录<button type="button" className="icon-button mobile-logout" aria-label="退出登录" onClick={() => void logout()}><Icon name="logout" size={16} /></button></span></div>
+      <header className="page-header"><div><h1>{titles[page][0]}</h1><p>{titles[page][1]}</p></div>{page === 'jobs' && <button type="button" className="button primary" onClick={() => setPage('upload')}><Icon name="plus" size={18} />新建转录</button>}</header>
+      {error && <div className="banner error" role="alert"><Icon name="alert" size={18} /><span>{error}</span><button type="button" className="icon-button" aria-label="关闭提示" onClick={() => setError('')}><Icon name="close" size={16} /></button></div>}
       {notice && <div className="toast" role="status"><Icon name="check" size={18} />{notice}</div>}
-      <div className="page-surface"><section hidden={page !== 'upload'}><UploadPane user={user} caps={caps} storage={storage} onStorageChanged={() => void refreshStorage()} onSubmitted={() => { void refresh(); void refreshStorage(); setNotice('素材已进入转录队列'); }} onOpenJobs={() => setPage('jobs')} /></section>
-      {page === 'jobs' && <><div className="section-heading"><h2>我的任务 <span className="count">{jobs.length}</span></h2><button className="button ghost small" onClick={() => void refresh()}><Icon name="refresh" size={16} />刷新</button></div>{jobs.length === 0 ? <Empty title="还没有转录任务" detail="上传一段音频或视频，你的结果会保存在这里。" action={() => setPage('upload')} /> : <div className="job-list">{jobs.map(job => <JobCard key={job.id} job={job} busy={busyJob === job.id} onOpen={() => { setActiveId(job.id); setPage('result'); }} onAction={a => void jobAction(job, a)} />)}</div>}{nextCursor !== null && <button className="button secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? '正在读取…' : '加载更多任务'}</button>}<p className="footnote">任务结束后保留 {caps?.retention_days ?? 7} 天。删除后将同时移除音频、文字和编辑记录。</p></>}
+      <div className="page-surface"><section hidden={page !== 'upload'}><UploadPane user={user} caps={caps} storage={storage} storageError={storageError} capsError={capsError} onStorageChanged={() => void refreshStorage()} onSubmitted={() => { void refresh(); void refreshStorage(); setNotice('素材已进入转录队列'); }} onOpenJobs={() => setPage('jobs')} /></section>
+      {page === 'jobs' && <><div className="section-heading"><h2>我的任务 <span className="count">{jobsState !== 'ready' && !jobs.length ? '—' : jobs.length}</span></h2><button type="button" className="button ghost small" onClick={() => void refresh()}><Icon name="refresh" size={16} />刷新</button></div>{jobs.length === 0 ? jobsState === 'loading' ? <div className="loading-panel" role="status" aria-busy="true"><p>正在读取任务…</p><div className="loading-lines" aria-hidden="true"><i /><i /><i /></div></div> : jobsState === 'error' ? <div className="list-error" role="status"><Icon name="alert" size={24} /><h3>任务列表暂时无法读取</h3><p>请查看上方错误提示，使用刷新重新读取。</p></div> : <Empty title="还没有转录任务" detail="上传一段音频或视频，你的结果会保存在这里。" action={() => setPage('upload')} /> : <div className="job-list">{jobs.map(job => <JobCard key={job.id} job={job} busy={busyJob === job.id} onOpen={() => { setActiveId(job.id); setPage('result'); }} onAction={a => void jobAction(job, a)} />)}</div>}{nextCursor !== null && <button type="button" className="button secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? '正在读取…' : '加载更多任务'}</button>}<p className="footnote">任务结束后保留 {caps?.retention_days ?? 7} 天。删除后将同时移除音频、文字和编辑记录。</p></>}
       {page === 'result' && activeId && <ResultPane key={activeId} jobId={activeId} models={caps?.models ?? []} onBack={() => setPage('jobs')} onChanged={() => { void refresh(); void refreshStorage(); }} />}
       {page === 'admin' && user.is_admin && <AdminPane />}
-      </div><footer className="page-footer"><span>声笺 <span className="muted">·</span> 把精力留给内容</span><span>本地处理 · 忠实转录 · 可回听校对</span></footer>
+      </div><footer className="page-footer"><span>声笺工作台</span><span>本地处理，可回听校对</span></footer>
     </main>
   </div>;
 }
@@ -176,19 +181,22 @@ function Login({ initialError, onLogin }: { initialError: string; onLogin: (user
   useEntrance(root, 'login', '.login-story > div, .login-form');
   const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(initialError); const [busy, setBusy] = useState(false);
   async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); setError(''); try { const r = await api<{ user: User }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }, true); setPassword(''); onLogin(r.user); } catch (e) { setError(message(e)); } finally { setBusy(false); } }
-  return <main ref={root} className="login-shell"><section className="login-story"><div className="brand light"><span className="brand-mark"><Icon name="wave" size={27} /></span><span>声笺<small>ASR WORKSPACE</small></span></div><div><div className="eyebrow">LISTEN. TRANSCRIBE. CREATE.</div><h1>声音里的想法，<br />值得被好好记录。</h1><p>从一段口播，到一整期播客。<br />在本地完成转录、回听和字幕交付。</p><div className="sound-decoration" aria-hidden="true">{[16, 28, 45, 31, 65, 84, 56, 97, 72, 44, 68, 88, 54, 34, 46, 23, 14].map((h, i) => <i key={i} style={{ height: `${h}px` }} />)}</div></div><span className="login-caption">YOUR WORDS, CLOSE TO HOME.</span></section><section className="login-form-wrap"><form className="login-form" onSubmit={e => void submit(e)}><div className="eyebrow">WELCOME BACK</div><h2>进入你的工作空间</h2><p>使用管理员为你创建的账户登录。</p><label>用户名<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required autoFocus placeholder="输入用户名" /></label><label>密码<input value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" type="password" required placeholder="输入密码" /></label>{error && <div className="inline-error" role="alert">{error}</div>}<button type="submit" className="button primary wide" disabled={busy}>{busy ? '正在登录…' : '进入工作台'}<Icon name="arrow" size={18} /></button><p className="login-help">需要账户或重置密码？请联系工作台管理员。</p></form></section></main>;
+  return <main ref={root} className="login-shell"><section className="login-story"><div className="brand light"><span className="brand-mark"><Icon name="wave" size={27} /></span><span>声笺<small>ASR WORKSPACE</small></span></div><div><h1>在本地完成转录与校对</h1><p>从一段口播，到一整期播客。<br />转录、回听和字幕交付，都在工作台完成。</p></div><p className="login-caption">音频与结果在本地服务器处理</p></section><section className="login-form-wrap"><form className="login-form" onSubmit={e => void submit(e)} aria-busy={busy}><h2>登录工作台</h2><p>使用管理员为你创建的账户登录。</p><label>用户名<input name="username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required aria-required="true" autoFocus placeholder="输入用户名" /></label><label>密码<input name="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" type="password" required aria-required="true" placeholder="输入密码" /></label>{error && <div className="inline-error" role="alert">{error}</div>}<button type="submit" className="button primary wide" disabled={busy}>{busy ? '正在登录…' : '进入工作台'}<Icon name="arrow" size={18} /></button><p className="login-help">需要账户或重置密码？请联系工作台管理员。</p></form></section></main>;
 }
 
-export function Empty({ title, detail, action }: { title: string; detail: string; action?: () => void }) { return <div className="empty-state"><div className="empty-icon"><Icon name="headphones" size={28} /></div><h3>{title}</h3><p>{detail}</p>{action && <button className="button secondary" onClick={action}>上传第一份素材<Icon name="arrow" size={16} /></button>}</div>; }
+export function Empty({ title, detail, action }: { title: string; detail: string; action?: () => void }) { return <div className="empty-state"><div className="empty-icon"><Icon name="headphones" size={28} /></div><h3>{title}</h3><p>{detail}</p>{action && <button type="button" className="button secondary" onClick={action}>上传第一份素材<Icon name="arrow" size={16} /></button>}</div>; }
 
 function JobCard({ job, busy, onOpen, onAction }: { job: Job; busy: boolean; onOpen: () => void; onAction: (a: 'cancel' | 'retry' | 'delete') => void }) {
   const progress = job.progress; const active = !terminal(job.status); const percent = Math.max(0, Math.min(100, progress?.percent ?? 0));
-  return <article className="job-card"><div className="file-icon"><Icon name="file" size={24} /></div><div className="job-main"><div className="job-title-row"><button className="text-link job-title" onClick={onOpen}>{job.filename}</button><span className={`badge ${job.status === 'completed' ? 'success' : job.status === 'failed' ? 'danger' : active ? 'processing' : ''}`}>{jobStatusLabel(job)}</span></div><div className="job-meta"><span>{date(job.created_at)}</span>{job.audio_size_bytes !== undefined && job.audio_size_bytes > 0 && <span>回听音频 {bytes(job.audio_size_bytes)}</span>}{job.queue_position ? <span>前方 {job.queue_position} 个任务</span> : progress?.total_chunks ? <span>{progressText(job)}</span> : null}{job.expires_at && <span>{date(job.expires_at)} 到期</span>}</div>{active && <div className="job-progress"><div className="progress-track"><span style={{ width: `${percent}%` }} /></div><small>{phaseName(progress?.phase || job.status)}{progressText(job) ? ` · ${progressText(job)}` : ''}{job.next_attempt_at ? ` · 下次尝试 ${date(job.next_attempt_at)}` : ''}</small></div>}{job.error && <p className="inline-error">{errorNames[job.error.code] || job.error.message}</p>}</div><div className="job-actions"><button className="button secondary small" onClick={onOpen}>{job.result || job.has_result ? '查看结果' : '查看任务'}<Icon name="arrow" size={15} /></button>{active ? <button className="button ghost small" disabled={busy || job.status === 'cancel_requested'} onClick={() => onAction('cancel')}>取消</button> : <>{canRetry(job) && <button className="button ghost small" disabled={busy} onClick={() => onAction('retry')}>{retryLabel(job)}</button>}<button className="button ghost small danger-text" disabled={busy} onClick={() => onAction('delete')}>删除</button></>}</div></article>;
+  const coverage = completeness(job);
+  const incomplete = coverage.complete === false || (coverage.gap_count ?? 0) > 0 || job.error?.code === 'quality_incomplete';
+  const statusTone = incomplete ? 'warning' : job.status === 'completed' ? 'success' : job.status === 'failed' ? 'danger' : ['retry_wait', 'paused_for_release', 'cancel_requested'].includes(job.status) ? 'warning' : active ? 'processing' : 'neutral';
+  return <article className="job-card" aria-busy={busy}><div className="file-icon"><Icon name="file" size={24} /></div><div className="job-main"><div className="job-title-row"><button type="button" className="text-link job-title" onClick={onOpen}>{job.filename}</button><span className={`badge ${statusTone}`}>{jobStatusLabel(job)}</span></div><div className="job-meta"><span><span className="job-meta-label">创建</span> {date(job.created_at)}</span>{job.audio_size_bytes !== undefined && job.audio_size_bytes > 0 && <span>回听音频 {bytes(job.audio_size_bytes)}</span>}{job.queue_position ? <span>前方 {job.queue_position} 个任务</span> : progress?.total_chunks ? <span>{progressText(job)}</span> : null}{job.expires_at && <span>{date(job.expires_at)} 到期</span>}</div>{active && <div className="job-progress"><div className="progress-track" role="progressbar" aria-label="任务处理进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress?.percent !== undefined ? percent : undefined}><span style={{ transform: `scaleX(${percent / 100})` }} /></div><small>{phaseName(progress?.phase || job.status)}{progressText(job) ? `，${progressText(job)}` : ''}{job.next_attempt_at ? `，下次尝试 ${date(job.next_attempt_at)}` : ''}</small></div>}{job.error && <p className="inline-error">{errorNames[job.error.code] || job.error.message}</p>}</div><div className="job-actions"><button type="button" className="button secondary small" onClick={onOpen}>{job.result || job.has_result ? '查看结果' : '查看任务'}<Icon name="arrow" size={15} /></button>{active ? <button type="button" className="button ghost small" disabled={busy || job.status === 'cancel_requested'} onClick={() => onAction('cancel')}>取消</button> : <>{canRetry(job) && <button type="button" className="button ghost small" disabled={busy} onClick={() => onAction('retry')}>{retryLabel(job)}</button>}<button type="button" className="button ghost small danger-text" disabled={busy} onClick={() => onAction('delete')}>删除</button></>}</div></article>;
 }
 
 export function StorageMeter({ storage }: { storage: StorageUsage }) {
   const allocated = storage.allocated_bytes;
   const saved = storage.saved_bytes + storage.text_bytes;
   const processing = storage.temporary_bytes + storage.reserved_bytes;
-  return <div className="storage-meter" aria-label="工作台容量"><div><span>工作台配额</span><strong>{bytes(allocated)} <small>/ {bytes(storage.quota_bytes)}</small></strong></div><div className="progress-track"><span style={{ width: `${Math.min(100, storage.quota_bytes ? allocated / storage.quota_bytes * 100 : 0)}%` }} /></div><dl className="storage-breakdown"><div><dt>已保存</dt><dd>{bytes(saved)}</dd></div><div><dt>处理占用及预留</dt><dd>{bytes(processing)}</dd></div><div><dt>剩余可分配</dt><dd>{bytes(storage.available_bytes)}</dd></div></dl><p className="footnote">已保存含音频、文字及版本；处理占用随任务结束释放。</p></div>;
+  return <div className="storage-meter" aria-label="工作台容量"><div><span>工作台配额</span><strong>{bytes(allocated)} <small>/ {bytes(storage.quota_bytes)}</small></strong></div><div className="progress-track" role="meter" aria-label="配额分配比例" aria-valuemin={0} aria-valuemax={storage.quota_bytes} aria-valuenow={Math.min(allocated, storage.quota_bytes)} aria-valuetext={`${bytes(allocated)} / ${bytes(storage.quota_bytes)}`}><span style={{ transform: `scaleX(${Math.min(1, storage.quota_bytes ? allocated / storage.quota_bytes : 0)})` }} /></div><dl className="storage-breakdown"><div><dt>已保存</dt><dd>{bytes(saved)}</dd></div><div><dt>处理占用及预留</dt><dd>{bytes(processing)}</dd></div><div><dt>剩余可分配</dt><dd>{bytes(storage.available_bytes)}</dd></div></dl><p className="footnote">已保存含音频、文字及版本；处理占用随任务结束释放。</p></div>;
 }
