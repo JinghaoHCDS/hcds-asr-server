@@ -1,0 +1,22 @@
+{
+  "kind": "synthetic_speech_fixture",
+  "audio_file": "test_short.wav",
+  "reference_file": "test_short.reference.txt",
+  "reference_sha256": "18e1ed5f9c24b84de11b2c5dc0e76cc159bd858be08c915a1a20fd518fcd101a",
+  "generator": "scripts/generate_test_audio.py",
+  "synthesizer": "Flite 2.2",
+  "voice": "kal",
+  "synthesizer_source": "https://github.com/festvox/flite",
+  "synthesizer_revision": "e9e2e37c329dbe98bfeb27a1828ef9a71fa84f88",
+  "synthesizer_binary_sha256": "9253fcb0a1ce8869405052415e8278c55d280c049497acb33d5059bccceb5600",
+  "revision_verified_by_generator": false,
+  "sample_rate": 16000,
+  "channels": 1,
+  "sample_width_bytes": 2,
+  "frames": 161686,
+  "duration_seconds": 10.105375,
+  "sha256": "56717d7e62e209e426d939d33334643cc682fac6b0bbd1f436cea090b37e5ad1",
+  "license": "MIT",
+  "third_party_notices": "../../THIRD_PARTY_NOTICES.md",
+  "quality_validation": "not_run_on_real_asr_or_forced_alignment"
+}

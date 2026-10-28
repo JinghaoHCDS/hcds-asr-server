@@ -21,6 +21,9 @@ model_cache/
 hf_cache/
 .cache/
 transcripts/
+asr-transcripts/
+/artifacts/
+/scratch/
 data/
 frontend/node_modules/
 frontend/dist/

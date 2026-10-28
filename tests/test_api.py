@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 
 import pytest
+from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
 
 from asr_server import main as main_module
@@ -16,6 +18,7 @@ from asr_server.adapters.mock import MockAsrAdapter
 from asr_server.audio import splitter as splitter_module
 from asr_server.config import Settings
 from asr_server.execution import MOSS_EXECUTION_POLICY
+from asr_server.errors import validation_error_handler
 from asr_server.main import create_app
 from tests.helpers import make_wav
 
@@ -35,6 +38,24 @@ async def test_health_returns_ok(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+async def test_validation_error_drops_input_context_and_free_text_message() -> None:
+    marker = "private-validation-marker"
+    error = RequestValidationError([{
+        "type": "value_error", "loc": ("body", "text"),
+        "msg": f"Value error, {marker}", "input": marker,
+        "ctx": {"error": ValueError(marker)},
+    }])
+    response = await validation_error_handler(Request({"type": "http"}), error)
+
+    assert response.status_code == 400
+    assert marker.encode() not in response.body
+    assert b'"code":"bad_request"' in response.body
+    assert b'"type":"value_error"' in response.body
+    assert b'"loc":["body","text"]' in response.body
+    assert b'"msg":"Invalid value"' in response.body
+    assert b'"input"' not in response.body and b'"ctx"' not in response.body
 
 
 async def test_documentation_routes_are_accessible_and_openapi_is_parseable(client: AsyncClient) -> None:

@@ -30,7 +30,6 @@ from asr_server.main import create_app
 from asr_server.workbench.service import WorkbenchService
 
 
-PUBLIC_FIXTURE_SHA256 = "9121c5126488b541dc75aaced93ffe28a8e80207c87aa040a74e10ef1cec73d2"
 WAIT_SECONDS = 7200.0
 
 
@@ -217,8 +216,8 @@ async def run(args: argparse.Namespace, report: dict[str, Any]) -> None:
                 initial_check["seconds"] = round(time.monotonic() - started, 3)
                 initial_check["phases"] = phases
                 initial_check["transcript_chars"] = len(result["text"])
-                if report["parameters"]["source_sha256"] == PUBLIC_FIXTURE_SHA256:
-                    initial_check["public_fixture_text_prefix"] = result["text"][:200]
+                initial_check["text_characters"] = len(result["text"])
+                initial_check["text_sha256"] = hashlib.sha256(result["text"].encode("utf-8")).hexdigest()
                 report["transcription"] = initial_check
                 mp3_hash = str(initial_check["audio"]["sha256"])
                 pcm_hash = initial_check["pcm_sha256"]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 import time
 from multiprocessing.connection import Connection
@@ -7,6 +9,7 @@ from multiprocessing.connection import Connection
 import pytest
 
 from asr_server.errors import AsrError
+from asr_server.observability import event_record
 from asr_server.workers.transport import ProcessRpcTransport
 
 
@@ -100,3 +103,46 @@ def test_transport_detects_startup_crash() -> None:
 
     assert exc_info.value.code == "worker_unavailable"
     assert transport.is_alive is False
+
+
+def test_worker_cleanup_errors_keep_diagnostics_without_exception_messages(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    marker = "private-worker-error-marker /private/input.wav"
+    records: list[dict[str, object]] = []
+
+    def record_event(event: str, *, level: int = logging.INFO, **fields: object) -> None:
+        records.append(event_record(event, level=level, **fields))
+
+    class UnreapableProcess:
+        pid = 123456789
+
+        def join(self, timeout: float) -> None:
+            pass
+
+        def is_alive(self) -> bool:
+            return True
+
+        def terminate(self) -> None:
+            raise OSError(marker)
+
+        def kill(self) -> None:
+            raise OSError(marker)
+
+    process = UnreapableProcess()
+    transport = make_transport("ok")
+    transport._process = process
+    monkeypatch.setattr("asr_server.workers.transport.emit", record_event)
+    try:
+        transport.close(force=True)
+        assert transport._process is process
+        assert transport._poisoned is True
+        assert ProcessRpcTransport._quarantined[process.pid] is process
+    finally:
+        with ProcessRpcTransport._quarantine_lock:
+            ProcessRpcTransport._quarantined.pop(process.pid, None)
+        transport._process = None
+
+    assert {record["event"] for record in records} == {"worker.terminate_failed", "worker.kill_failed"}
+    assert all(record["error_type"] == "OSError" and record["error_chain"] for record in records)
+    assert marker not in json.dumps(records) and marker not in caplog.text

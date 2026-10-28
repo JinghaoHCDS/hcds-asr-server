@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from scripts.workbench_release import ReleaseError, require_generated_output
+
 
 SAMPLE_RATE = 16_000
 MAX_SECONDS = 21_600
@@ -219,7 +221,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=Path("data/platform-validation-20261025/resource"))
     parser.add_argument("--output", type=Path,
-                        default=Path("docs/validation-artifacts/2026-10-25-platform/resource-probe.json"))
+                        default=Path("artifacts/platform/resource-probe.json"))
     parser.add_argument("--sample-ms", type=float, default=25.0)
     parser.add_argument("--case", choices=CASES, help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -227,6 +229,11 @@ def main() -> None:
         parser.error("this resource probe requires POSIX sparse files and ps")
     if args.sample_ms <= 0 or args.sample_ms > 1000:
         parser.error("sample interval must be in (0, 1000] ms")
+    try:
+        require_generated_output(args.workspace)
+        require_generated_output(args.output)
+    except ReleaseError as exc:
+        parser.error(str(exc))
     args.workspace.mkdir(parents=True, exist_ok=True)
     if args.case:
         print(json.dumps(asyncio.run(child_case(args.case, args.workspace)), sort_keys=True))
@@ -243,7 +250,9 @@ def main() -> None:
               "not_validated": ["ASR text accuracy", "GPU/CUDA or model memory", "HTTP mixed-load latency",
                                 "MOSS native long-form full-input memory", "WSL FFmpeg build behavior"]}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    with args.output.open("w", encoding="utf-8") as target:
+        os.chmod(args.output, 0o600)
+        target.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps({"output": str(args.output), "cases": len(results),
                       "max_gateway_increment_mib": max(case["gateway_peak_increment_bytes"] for case in results) / 1024**2,
                       "all_within_budget": all(case["gateway_increment_within_256_mib"] for case in results)}, sort_keys=True))

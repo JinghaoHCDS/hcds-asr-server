@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -52,7 +53,7 @@ async def test_sparse_partial_result_is_visible_exported_and_isolated(workbench:
 
 async def test_worker_retry_releases_slot_for_next_task(workbench: tuple[FastAPI, WorkbenchService, AsyncClient], monkeypatch: pytest.MonkeyPatch) -> None:
     app, service, client = workbench
-    healthy = service_module.run_transcription_path
+    healthy: Callable[..., Awaitable[dict[str, Any]]] = getattr(service_module, "run_transcription_path")
     calls = 0
     async def fail_once(*args: Any, **kwargs: Any) -> dict[str, Any]:
         nonlocal calls

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from asr_server.config import Settings
 from asr_server.main import create_app
+from scripts.validation_output import add_report_arguments, emit_report, numeric_metrics, text_metrics, validate_report_output
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -41,29 +42,19 @@ async def run(args: argparse.Namespace) -> None:
                     },
                 )
             if response.status_code != 200:
-                raise RuntimeError(f"pipeline returned {response.status_code}: {response.text}")
+                raise RuntimeError(f"pipeline returned HTTP {response.status_code}")
             body = response.json()
             text = str(body["text"])
             if args.reject_hallucinated_term and args.reject_hallucinated_term.casefold() in text.casefold():
                 raise RuntimeError("negative Context check failed: absent keyword appeared in transcript")
-            print(
-                json.dumps(
-                    {
-                        "model": body["model"],
-                        "text": text,
-                        "timestamps_count": len(body["timestamps"]),
-                        "first_timestamps": body["timestamps"][:5],
-                        "last_timestamps": body["timestamps"][-5:],
-                        "context": body["context"],
-                        "timing": body["timing"],
-                        "generation": body["generation"],
-                        "timings": body["timings"],
-                        "warnings": body["warnings"],
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            emit_report({"model": body["model"], **text_metrics(text),
+                         "timestamps_count": len(body["timestamps"]),
+                         "timing": numeric_metrics(body["timing"]),
+                         "generation": numeric_metrics(body["generation"]),
+                         "timings": numeric_metrics(body["timings"]),
+                         "warnings_count": len(body["warnings"])},
+                        output=getattr(args, "output", None), content=body,
+                        include_content=getattr(args, "include_content", False))
     finally:
         await app.state.manager.shutdown()
 
@@ -77,14 +68,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keyword", action="append", default=[])
     parser.add_argument("--reject-hallucinated-term")
     parser.add_argument("--timeout", type=float, default=300.0)
+    add_report_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if not args.audio.is_file():
-        raise FileNotFoundError(args.audio)
-    asyncio.run(run(args))
+    try:
+        validate_report_output(args.output, include_content=args.include_content)
+        if not args.audio.is_file():
+            raise ValueError("audio must be a file")
+        asyncio.run(run(args))
+    except Exception as exc:
+        raise SystemExit(f"Qwen pipeline smoke failed ({type(exc).__name__})") from None
 
 
 if __name__ == "__main__":

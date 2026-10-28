@@ -1,8 +1,0 @@
-{
-  "exit_code": 0,
-  "wall_seconds": 13.061514870000337,
-  "gpu_memory_used_mib_before": 2853,
-  "gpu_memory_used_mib_peak": 8994,
-  "gpu_memory_used_mib_after": 2853,
-  "memory_measurement": "nvidia-smi whole GPU, includes unrelated allocations"
-}

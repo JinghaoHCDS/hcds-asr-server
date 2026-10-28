@@ -26,17 +26,28 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "manifest.json"
 SOURCE_DIRECTORIES = (
     "asr_server", "asr_mcp", "scripts", "tests", "docs", "requirements", "deploy",
-    "prompts", "assets/readme", "evaluation", "frontend/src", "frontend/dist", "skills/hcds-lan-asr",
+    "prompts", "assets/readme", "evaluation", "examples", "frontend/src", "frontend/dist",
 )
 SOURCE_FILES = (
-    "AGENTS.md", "CLAUDE.md", "README.md", "pyproject.toml", "uv.lock", ".env.example", ".gitignore",
+    "AGENTS.md", "CLAUDE.md", "README.md", "pyproject.toml", "uv.lock", ".python-version", ".env.example", ".gitignore",
+    ".github/workflows/ci.yml", ".gitleaks.toml", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md",
     "frontend/package.json", "frontend/package-lock.json", "frontend/pnpm-lock.yaml",
     "frontend/index.html", "frontend/tsconfig.json", "frontend/tsconfig.app.json",
-    "frontend/tsconfig.node.json", "frontend/vite.config.ts",
+    "frontend/tsconfig.node.json", "frontend/vite.config.ts", "frontend/design.md", "frontend/.gitignore",
     "test-fixtures/audio/test_short.wav", "test-fixtures/audio/README.md",
+    "test-fixtures/audio/test_short.reference.txt", "test-fixtures/audio/test_short.source.json",
+    "skills/hcds-lan-asr/SKILL.md", "skills/hcds-lan-asr/scripts/asr_batch.py",
 )
-EXCLUDED_PARTS = {".git", "node_modules", "__pycache__", ".venv", ".cache", ".pytest_cache", ".mypy_cache", ".ruff_cache", "logs", "secrets"}
+EXCLUDED_PARTS = {".git", ".agents", "node_modules", "__pycache__", ".venv", ".cache", ".pytest_cache", ".mypy_cache", ".ruff_cache", "logs", "secrets", "artifacts", "scratch", "asr-transcripts", "backups", "validation-artifacts"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".pem", ".key"}
+SOURCE_SUFFIXES = {
+    "asr_server": {".py"}, "asr_mcp": {".py"}, "scripts": {".py", ".sh"}, "tests": {".py"},
+    "docs": {".md"}, "requirements": {".txt"}, "deploy": {".sh", ".service", ".ps1"},
+    "prompts": {".md"}, "assets/readme": {".svg", ".md", ".png", ".webp"},
+    "evaluation": {".md", ".json"}, "examples": {".md", ".json"},
+    "frontend/src": {".ts", ".tsx", ".css", ".svg", ".json"},
+    "frontend/dist": {".html", ".js", ".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".woff", ".woff2"},
+}
 
 
 class ReleaseError(Exception):
@@ -57,11 +68,40 @@ def permitted(path: Path) -> bool:
         or path.as_posix() == "skills/hcds-lan-asr/server.json"
         or path.suffix in EXCLUDED_SUFFIXES
         or (path.name.startswith(".env") and path.name != ".env.example")
-        or path.name in {".DS_Store", "service.lock", "token", "token.txt", "tokens.json", "secrets.json", "credentials.json", ".npmrc", ".netrc"}
+        or path.name in {".DS_Store", "skills-lock.json", "service.lock", "token", "token.txt", "tokens.json", "secrets.json", "credentials.json", ".npmrc", ".netrc"}
     )
 
 
-def source_files(root: Path) -> list[Path]:
+def declared_source_paths(root: Path) -> set[str] | None:
+    """Use an explicit Git index or an exported release's member manifest.
+
+    Do not consult an enclosing repository when inspecting a standalone source
+    directory. Plain exports without either form still use the type allowlist.
+    """
+    if (root / ".git").exists():
+        try:
+            result = subprocess.run(["git", "ls-files", "--cached", "-z"], cwd=root,
+                                    capture_output=True, check=False, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ReleaseError("cannot read the Git source index") from exc
+        if result.returncode:
+            raise ReleaseError("cannot read the Git source index")
+        return {os.fsdecode(name) for name in result.stdout.split(b"\0") if name}
+    member_manifest = root / MANIFEST
+    if member_manifest.is_symlink():
+        raise ReleaseError("source release manifest must not be a symlink")
+    if member_manifest.is_file():
+        try:
+            info = json.loads(member_manifest.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise ReleaseError("source release manifest is invalid") from exc
+        if not isinstance(info, dict) or info.get("format_version") != 1 or info.get("kind") != "source_release" or not isinstance(info.get("files"), dict):
+            raise ReleaseError("source release manifest is invalid")
+        return {name for name in info["files"] if isinstance(name, str)}
+    return None
+
+
+def source_files(root: Path, *, require_declared: bool = False) -> list[Path]:
     files: set[Path] = set()
     for relative in SOURCE_FILES:
         path = root / relative
@@ -69,26 +109,63 @@ def source_files(root: Path) -> list[Path]:
             files.add(path)
     for relative in SOURCE_DIRECTORIES:
         directory = root / relative
+        if directory.is_symlink():
+            raise ReleaseError(f"source symlink is not allowed: {relative}")
         if directory.is_dir():
-            files.update(path for path in directory.rglob("*") if path.is_file() and permitted(path.relative_to(root)))
+            for path in directory.rglob("*"):
+                member = path.relative_to(root)
+                if not permitted(member):
+                    continue
+                if path.is_symlink():
+                    raise ReleaseError(f"source symlink is not allowed: {member}")
+                if not path.is_file():
+                    continue
+                if path.suffix not in SOURCE_SUFFIXES[relative]:
+                    raise ReleaseError(f"unsupported source resource; declare its purpose before bundling: {member}")
+                files.add(path)
+    declared = declared_source_paths(root) if require_declared else None
     for path in files:
         if not path.resolve().is_relative_to(root.resolve()):
             raise ReleaseError(f"source path leaves project directory: {path.relative_to(root)}")
         if path.is_symlink() and path.name != "CLAUDE.md":
             raise ReleaseError(f"source symlink is not allowed: {path.relative_to(root)}")
+        relative_path = path.relative_to(root)
+        if declared is not None and relative_path.as_posix() not in declared and not relative_path.is_relative_to("frontend/dist"):
+            raise ReleaseError(f"source file is not in the Git index or release manifest: {relative_path}")
     return sorted(files)
+
+
+def require_generated_output(path: Path, source_root: Path = SOURCE_ROOT) -> None:
+    """Keep newly generated reports/packages out of all source collection trees."""
+    path, source_root = path.resolve(), source_root.resolve()
+    if not path.is_relative_to(source_root):
+        return
+    member = path.relative_to(source_root)
+    if member.as_posix() in SOURCE_FILES or any(member.is_relative_to(directory) for directory in SOURCE_DIRECTORIES):
+        raise ReleaseError("generated output must be outside the source collection trees")
+    if (source_root / ".git").exists():
+        try:
+            result = subprocess.run(["git", "check-ignore", "--quiet", "--", str(path)], cwd=source_root,
+                                    capture_output=True, check=False, timeout=5)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ReleaseError("cannot verify the generated output ignore rule") from exc
+        if result.returncode != 0:
+            raise ReleaseError("generated output inside the checkout must be ignored; choose artifacts/ or an external directory")
+    elif not member.parts or member.parts[0] not in {"artifacts", "scratch", "data", "tmp"}:
+        raise ReleaseError("generated output inside a source export must use artifacts/, scratch/, data/, or tmp/")
 
 
 def source_identity(root: Path) -> dict[str, Any]:
     files = {str(path.relative_to(root)): digest(path) for path in source_files(root)}
     source_digest = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
     commit: str | None = None
-    try:
-        result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=5, check=False)
-        if result.returncode == 0:
-            commit = result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    if (root / ".git").exists():
+        try:
+            result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=5, check=False)
+            if result.returncode == 0:
+                commit = result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
     return {"commit": commit, "source_digest": source_digest,
             "instructions": "Restore this data with the source release matching source_digest; commit alone may omit local changes."}
 
@@ -109,11 +186,20 @@ def ensure_new(path: Path) -> None:
 
 
 def bundle(output: Path, source_root: Path = SOURCE_ROOT) -> dict[str, Any]:
+    if output.is_symlink():
+        raise ReleaseError("release output must not be a symlink")
     output = output.resolve()
+    require_generated_output(output, source_root)
     ensure_new(output)
     if not (source_root / "frontend/dist/index.html").is_file():
         raise ReleaseError("frontend/dist/index.html is missing; build the frontend before bundling")
-    files = source_files(source_root)
+    files = source_files(source_root, require_declared=True)
+    from scripts.check_repository import check_markdown
+    members = {path.relative_to(source_root).as_posix() for path in files}
+    findings = check_markdown(source_root.resolve(), sorted(members), members=members)
+    if findings:
+        first = findings[0]
+        raise ReleaseError(f"package documentation is incomplete: {first.path}:{first.line} ({first.category})")
     info = manifest("source_release", source_root, files)
     info["source"] = source_identity(source_root)
     with tempfile.NamedTemporaryFile(prefix=".asr-release-", dir=output.parent, delete=False) as temporary:

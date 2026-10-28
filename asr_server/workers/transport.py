@@ -9,7 +9,7 @@ from multiprocessing.connection import Connection
 from typing import Any
 
 from asr_server.errors import AsrError
-from asr_server.observability import PROTOCOL_VERSION, current_context, emit
+from asr_server.observability import PROTOCOL_VERSION, current_context, emit, safe_exception
 from asr_server.workers.codec import request_envelope
 
 
@@ -236,14 +236,16 @@ class ProcessRpcTransport:
             try:
                 process.terminate()
                 process.join(timeout=self._terminate_timeout_seconds)
-            except OSError:
-                logger.exception("worker terminate failed")
+            except OSError as exc:
+                emit("worker.terminate_failed", level=logging.WARNING, worker_pid=process.pid,
+                     worker_generation=self._generation, engine_id=self.name, diagnostics=safe_exception(exc))
         if force and process.is_alive():
             try:
                 process.kill()
                 process.join(timeout=self._kill_timeout_seconds)
-            except OSError:
-                logger.exception("worker kill failed")
+            except OSError as exc:
+                emit("worker.kill_failed", level=logging.ERROR, worker_pid=process.pid,
+                     worker_generation=self._generation, engine_id=self.name, diagnostics=safe_exception(exc))
         if process.is_alive():
             with self._quarantine_lock:
                 self._quarantined[process.pid] = process

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.platform_resource_probe import RSS_BUDGET, rss_bytes, sample_processes
+from scripts.workbench_release import ReleaseError, require_generated_output
 
 
 CASES = (600, 3600, 21600)
@@ -206,7 +207,7 @@ def supervise(seconds: int, workspace: Path, sample_ms: float) -> dict[str, Any]
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=Path("data/platform-validation-20261025/gateway-memory"))
-    parser.add_argument("--output", type=Path, default=Path("docs/validation-artifacts/2026-10-25-platform/gateway-memory.json"))
+    parser.add_argument("--output", type=Path, default=Path("artifacts/platform/gateway-memory.json"))
     parser.add_argument("--sample-ms", type=float, default=25)
     parser.add_argument("--cases", type=int, nargs="+", choices=CASES, default=list(CASES))
     parser.add_argument("--case", type=int, choices=CASES, help=argparse.SUPPRESS)
@@ -216,9 +217,18 @@ def main() -> None:
         parser.error("this resource probe requires POSIX and ps")
     if not 0 < args.sample_ms <= 1000:
         parser.error("sample interval must be in (0, 1000] ms")
+    try:
+        require_generated_output(args.workspace)
+        require_generated_output(args.output)
+    except ReleaseError as exc:
+        parser.error(str(exc))
     if args.case:
         if args.case_root is None:
             parser.error("internal case requires --case-root")
+        try:
+            require_generated_output(args.case_root)
+        except ReleaseError as exc:
+            parser.error(str(exc))
         print(json.dumps(asyncio.run(gateway_case(args.case, args.case_root)), sort_keys=True))
         return
     args.workspace.mkdir(parents=True, exist_ok=True)
@@ -239,7 +249,9 @@ def main() -> None:
               "source_code_sha256": code_hashes(), "cases": results,
               "not_validated": ["GPU/CUDA", "ASR quality", "model worker memory", "real network latency", "WSL FFmpeg build"]}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with args.output.open("w", encoding="utf-8") as target:
+        os.chmod(args.output, 0o600)
+        target.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({"output": str(args.output), "all_within_budget": all(case["gateway_increment_within_256_mib"] for case in results)}))
 
 

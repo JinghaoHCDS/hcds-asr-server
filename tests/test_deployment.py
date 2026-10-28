@@ -200,9 +200,20 @@ def test_copy_preserves_target_settings_and_excludes_runtime_data(tmp_path: Path
     (checkout / ".env").write_text("source secret\n")
     (checkout / ".env.production").write_text("source secret\n")
     (checkout / ".env.example").write_text("ASR_ENABLE_MOSS=0\n")
-    for name in (".venv", "model_cache", "hf_cache", "logs", "tmp", "uploads", "transcripts"):
-        (checkout / name).mkdir()
+    excluded_directories = (
+        ".venv", "model_cache", "hf_cache", "logs", "tmp", "uploads", "transcripts", "asr-transcripts",
+        "artifacts", "scratch", "backups", ".agents", "docs/validation-artifacts",
+    )
+    for name in excluded_directories:
+        (checkout / name).mkdir(parents=True, exist_ok=True)
         (checkout / name / "runtime-file").write_text("runtime data\n")
+    (checkout / ".DS_Store").write_text("synthetic local metadata\n")
+    (checkout / "skills-lock.json").write_text("{}\n")
+    (checkout / "skills/hcds-lan-asr").mkdir(parents=True)
+    (checkout / "skills/hcds-lan-asr/server.json").write_text('{"base_url":"http://private-host:18080"}')
+    (checkout / "skills/hcds-lan-asr/SKILL.md").write_text("# Official Skill\n")
+    (checkout / "frontend/dist").mkdir(parents=True)
+    (checkout / "frontend/dist/index.html").write_text("<title>synthetic frontend</title>\n")
 
     result = run_deploy(checkout, environment, "--mock", "--deploy-dir", str(target), "--no-enable-service")
 
@@ -211,7 +222,12 @@ def test_copy_preserves_target_settings_and_excludes_runtime_data(tmp_path: Path
     assert not (target / ".env.production").exists()
     assert (target / ".env.example").exists()
     assert (target / "operator-notes.txt").read_text() == "preserve\n"
-    assert not any((target / name / "runtime-file").exists() for name in (".venv", "model_cache", "hf_cache", "logs", "tmp", "uploads", "transcripts"))
+    assert not any((target / name / "runtime-file").exists() for name in excluded_directories)
+    assert not (target / ".DS_Store").exists()
+    assert not (target / "skills-lock.json").exists()
+    assert not (target / "skills/hcds-lan-asr/server.json").exists()
+    assert (target / "skills/hcds-lan-asr/SKILL.md").exists()
+    assert (target / "frontend/dist/index.html").exists()
 
 
 def test_start_and_shutdown_use_bounded_local_health_checks(tmp_path: Path) -> None:

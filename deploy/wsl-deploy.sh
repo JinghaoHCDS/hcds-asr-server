@@ -281,12 +281,20 @@ sync_source_tree() {
   log "syncing ${SOURCE_DIR} to ${DEPLOY_DIR}"
   rsync -a \
     --exclude '.git/' \
+    --exclude '.agents/' \
+    --exclude '.DS_Store' \
+    --exclude 'skills-lock.json' \
     --exclude '.venv/' \
     --exclude '.mypy_cache/' \
     --exclude '.pytest_cache/' \
     --exclude '__pycache__/' \
     --exclude '.ruff_cache/' \
     --exclude 'transcripts/' \
+    --exclude 'asr-transcripts/' \
+    --exclude 'artifacts/' \
+    --exclude 'scratch/' \
+    --exclude 'backups/' \
+    --exclude 'validation-artifacts/' \
     --exclude 'uploads/' \
     --exclude 'models/' \
     --exclude 'model_cache/' \
@@ -299,6 +307,7 @@ sync_source_tree() {
     --exclude '.env.*' \
     --exclude 'data/' \
     --exclude 'node_modules/' \
+    --exclude '/skills/hcds-lan-asr/server.json' \
     "${SOURCE_DIR}/" "${DEPLOY_DIR}/"
 }
 
@@ -423,7 +432,7 @@ install_user_service() {
   local tmp_file
   service_dir="${HOME}/.config/systemd/user"
   service_file="${service_dir}/asr-server.service"
-  tmp_file="$(mktemp)"
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/asr-service.XXXXXX")"
   SERVICE_TMP_FILE="${tmp_file}"
 
   mkdir -p "${service_dir}"

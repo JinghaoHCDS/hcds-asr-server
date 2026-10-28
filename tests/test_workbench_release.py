@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import subprocess
 import tarfile
 from pathlib import Path
 
 import pytest
 
 from asr_server.workbench.store import WorkbenchStore
-from scripts.workbench_release import ReleaseError, backup, bundle, digest, offline_lock, restore, verify_backup
+from scripts.workbench_release import ReleaseError, backup, bundle, digest, offline_lock, restore, source_identity, verify_backup
 
 
 def source_fixture(root: Path) -> Path:
@@ -50,6 +51,29 @@ def test_bundle_uses_allowlist_and_hash_manifest(tmp_path: Path) -> None:
     (root / "skills/hcds-lan-asr/server.json").write_text('{"base_url":"http://private-host:18080"}')
     (root / "skills/lan-asr").mkdir()
     (root / "skills/lan-asr/SKILL.md").write_text("# Retired Skill\n")
+    public_resources = (
+        "LICENSE", "THIRD_PARTY_NOTICES.md", ".python-version", ".github/workflows/ci.yml", "frontend/design.md", "frontend/.gitignore",
+        "test-fixtures/audio/test_short.wav", "test-fixtures/audio/README.md", "scripts/generate_test_audio.py",
+        "test-fixtures/audio/test_short.reference.txt", "test-fixtures/audio/test_short.source.json",
+        "examples/batch-manifest.sample.json", "examples/output-sample/index.md",
+        "examples/output-sample/manifest.json",
+        "examples/output-sample/items/sample/transcript.md",
+        "examples/output-sample/items/sample/transcript.json",
+    )
+    for name in public_resources:
+        resource = root / name
+        resource.parent.mkdir(parents=True, exist_ok=True)
+        resource.write_text("synthetic sample\n")
+    license_text = "MIT License\n\nCopyright (c) 2026 Synthetic test contributors\n"
+    (root / "LICENSE").write_text(license_text)
+    private_materials = (
+        "docs/validation-artifacts/run/summary.json", "docs/artifacts/private.md", "docs/scratch/private.md",
+        "scripts/asr-transcripts/transcript.md", "assets/readme/.DS_Store",
+    )
+    for name in private_materials:
+        resource = root / name
+        resource.parent.mkdir(parents=True, exist_ok=True)
+        resource.write_text("never-copy-private-material\n")
     output = tmp_path / "release.tar.gz"
     result = bundle(output, root)
     assert result["sha256"] == digest(output)
@@ -64,6 +88,11 @@ def test_bundle_uses_allowlist_and_hash_manifest(tmp_path: Path) -> None:
         assert all("node_modules" not in name and "__pycache__" not in name and ".env" not in name for name in names)
         assert "token.txt" not in names
         assert "data/private.wav" not in names
+        assert all(name in names for name in public_resources)
+        assert not any(name in names for name in private_materials)
+        license_file = archive.extractfile("LICENSE")
+        assert license_file is not None
+        assert license_file.read() == license_text.encode()
         manifest_file = archive.extractfile("manifest.json")
         assert manifest_file is not None
         manifest = json.loads(manifest_file.read())
@@ -78,6 +107,72 @@ def test_bundle_requires_built_frontend(tmp_path: Path) -> None:
     (root / "frontend/dist/index.html").unlink()
     with pytest.raises(ReleaseError, match="build the frontend"):
         bundle(tmp_path / "missing.tar.gz", root)
+
+
+def test_bundle_blocks_references_to_excluded_review_pending_material(tmp_path: Path) -> None:
+    root = source_fixture(tmp_path / "source")
+    (root / "README.md").write_text("# Package\n[Evidence](docs/validation-artifacts/run/raw.json)\n")
+    raw = root / "docs/validation-artifacts/run/raw.json"
+    raw.parent.mkdir(parents=True)
+    raw.write_text('{"text":"synthetic-private-marker"}')
+    output = tmp_path / "incomplete.tar.gz"
+    with pytest.raises(ReleaseError, match="unshipped_link_target"):
+        bundle(output, root)
+    assert not output.exists()
+
+
+def test_bundle_requires_explicit_source_members_but_accepts_generated_frontend(tmp_path: Path) -> None:
+    root = source_fixture(tmp_path / "source")
+    subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "asr_server", "pyproject.toml"], check=True)
+    (root / "docs").mkdir()
+    (root / "docs/unreviewed.md").write_text("synthetic unreviewed note\n")
+    output = tmp_path / "release.tar.gz"
+    with pytest.raises(ReleaseError, match="not in the Git index"):
+        bundle(output, root)
+    assert not output.exists()
+    subprocess.run(["git", "-C", str(root), "add", "docs/unreviewed.md"], check=True)
+    bundle(output, root)
+    with tarfile.open(output) as archive:
+        assert "docs/unreviewed.md" in archive.getnames()
+        assert "frontend/dist/index.html" in archive.getnames()
+
+
+def test_source_export_rebundles_with_manifest_and_keeps_source_identity(tmp_path: Path) -> None:
+    root = source_fixture(tmp_path / "source")
+    original = source_identity(root)
+    output = tmp_path / "release.tar.gz"
+    bundle(output, root)
+    exported = tmp_path / "exported"
+    with tarfile.open(output) as archive:
+        archive.extractall(exported, filter="data")
+    assert source_identity(exported)["source_digest"] == original["source_digest"]
+    bundle(tmp_path / "exported-release.tar.gz", exported)
+    (exported / "docs").mkdir()
+    (exported / "docs/unreviewed.md").write_text("synthetic unreviewed note\n")
+    with pytest.raises(ReleaseError, match="not in the Git index or release manifest"):
+        bundle(tmp_path / "unexpected.tar.gz", exported)
+
+
+@pytest.mark.parametrize("relative", ["docs/private.json", "docs/previous-release.tar.gz", "frontend/dist/index.js.map"])
+def test_bundle_rejects_undeclared_resource_types(tmp_path: Path, relative: str) -> None:
+    root = source_fixture(tmp_path / "source")
+    resource = root / relative
+    resource.parent.mkdir(parents=True, exist_ok=True)
+    resource.write_text("synthetic private payload\n")
+    with pytest.raises(ReleaseError, match="unsupported source resource"):
+        bundle(tmp_path / "release.tar.gz", root)
+
+
+def test_bundle_output_cannot_become_future_source_input(tmp_path: Path) -> None:
+    root = source_fixture(tmp_path / "source")
+    for relative in ("docs/release.tar.gz", "frontend/dist/release.tar.gz", "release.tar.gz"):
+        with pytest.raises(ReleaseError, match="generated output"):
+            bundle(root / relative, root)
+    output = root / "artifacts/release.tar.gz"
+    bundle(output, root)
+    with tarfile.open(output) as archive:
+        assert not any(name.startswith("artifacts/") for name in archive.getnames())
 
 
 def test_backup_restore_preserves_sqlite_media_checkpoints_and_permissions(tmp_path: Path) -> None:

@@ -1,0 +1,12 @@
+title = "HCDS ASR source credential checks"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Source manifests store a SHA-256 for auth.py, not an authentication credential."
+regexTarget = "line"
+regexes = ['''^[+-]?\s*"asr_server/auth\.py":\s*"[0-9a-f]{64}",?\s*$''']

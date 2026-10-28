@@ -1,65 +1,64 @@
 # 文档索引
 
-网页使用者从 [README](../README.md#使用工作台) 开始；部署者从 README 和 WSL 指南开始；Agent 接入者从 MCP / 批量工作流开始。模型和能力始终以运行中的 `GET /v1/models` 为准。
+使用者从 [README](../README.md)开始；开发者与 Agent 先读 [AGENTS](../AGENTS.md)。运行时模型和能力以 `GET /v1/models` 为准，精确接口 schema 读取 `/openapi.json`；文档不能替代真实环境验收。
 
-## 使用与维护
+## 使用指南
 
-- [官方 hcds-lan-asr Skill](../skills/hcds-lan-asr/SKILL.md)：部署后通过 `/skill` 读取同一份 Agent 用法，`/skill/hcds-lan-asr.zip` 下载完整指南及批量客户端；确切接口和运行时能力分别读取 `/openapi.json`、`/v1/models`。
-- [局域网工作台与 Qwen 质量流程](product-workbench.md)：账号、断点上传、七天任务保留、长文搜索与跳转、回听改字及字幕导出。
-- [工作台高质量音频与存储执行方案](workbench-audio-storage-plan.md)：已完成的 192 kbps MP3 保留、临时识别音频回收、容量展示和旧任务清理；实测范围见对应验收记录。
-- [转录健壮性与高可用专项计划](transcription-resilience-plan.md)：已实现的有界恢复、稀疏进度、局部声音待确认、worker 自愈和就绪检测；专项关闭条件与未验收项见对应记录。
-- [已接入模型的推理实践](asr-model-practices.md)：Qwen 官方 native helpers、音频规范化、生成预算、ForcedAligner 和 MOSS SDPA 的代码与官方来源对照。
-- [Qwen 质量评测](../evaluation/README.md)：开发/验收集、切分候选对照、CER/术语/字幕门槛。
-- [WSL 部署](wsl-deployment.md)：Windows / NVIDIA / WSL 前提、首次 GPU 验收、systemd、Windows 启动与局域网访问。
-- [MCP bridge](mcp-bridge.md)：客户端 stdio 配置、音频允许目录和八个工具。
-- [口播、播客与批量交接](batch-workflow.md)：逐素材 Context、恢复 / 重试、JSON + Markdown 输出。
-- [API 合约](asr-server-prd.md)：模型能力、生命周期、异步 job、错误信封与鉴权。
-- [Swagger 说明](docs-endpoint-capabilities.md)：`/docs` 与当前 API 能力说明文本。
-- [验收模板](validation-template.md)：真实 WSL smoke 的记录要求。
-- [仓库清理记录](repository-cleanup.md)：产品化整理中删除、替代和保留的文件。
-- [性能与多 ASR 改进计划](asr-platform-improvement-plan.md)：资源边界、调试日志、性能、模型接入与测试精简的设计背景；实现行为见[平台运行契约](asr-platform-runtime.md)，检查结果见[平台验收](validation-2026-10-25-platform.md)。[Agent 任务包](asr-platform-agent-tasks.md)保留实施职责记录。
+- [WSL 部署](guides/wsl-deployment.md)：支持边界、CUDA 门槛、启动与排障。
+- [升级与回滚](guides/upgrading.md)：checkout／发行目录更新，当前 schema 4→5 保留数据及更早版本边界。
+- [MCP bridge](guides/mcp-bridge.md)：客户端 stdio、允许目录与工具。
+- [口播、播客与批量交接](guides/batch-workflow.md)：逐素材 Context、恢复和正式结果目录。
+- [日志与离线诊断](guides/asr-diagnostics.md)：默认不含正文的关联事件和诊断包。
+- [官方 hcds-lan-asr Skill](../skills/hcds-lan-asr/SKILL.md)：部署后先读 `/skill`，ZIP 下载同源客户端并动态带入服务地址。
 
-## 验收记录
+## 当前参考
 
-- [2026-10-26 转录恢复与服务健壮性](validation-2026-10-26-transcription-resilience.md)：schema 5 保留迁移、真实 worker 故障恢复、两条任务处理到末尾、四处声音待确认及验证边界。
+- [API／产品契约](reference/asr-server-prd.md)：模型能力、生命周期、参数、错误和内存 job。
+- [工作台契约](reference/product-workbench.md)：账户隔离、schema 5、音频／容量、恢复、编辑与导出。
+- [平台运行契约](reference/asr-platform-runtime.md)：资源准入、FIFO、资产、持久化和就绪。
+- [OpenAPI 说明资源](reference/docs-endpoint-capabilities.md)：服务实际读取的 `/docs` 描述；[MCP 指南](guides/mcp-bridge.md)由 `/docs/mcp` 读取。
 
-这些是对应版本和环境的历史证据，不代表所有硬件、发行版、模型或音频质量都已验证。
+## 开发与维护
 
-- [2026-10-25 HCDS 改名](validation-2026-10-25-hcds-rename.md)：仓库与官方 Skill 名称、下载入口兼容及旧批次状态延续。
-- [2026-10-25 Skill 随包地址](validation-2026-10-25-skill-address.md)：部署地址自动注入、解压即用、地址覆盖顺序及生成配置不进入服务源包。
-- [2026-10-25 官方 Agent Skill](validation-2026-10-25-agent-skill.md)：本机 lan-asr 更新、官方同源分发、原始 HTML 发现入口、批量客户端迁移与 mock HTTP 流程。
-- [2026-10-25 工作台界面与长转录](validation-2026-10-25-workbench-ui.md)：HCDS 主题、GSAP、固定视口与虚拟列表；10,800 段构造样本、手机布局、完整导出和前端覆盖发布。
-- [2026-10-25 审查修复与线上实测](validation-2026-10-25-review-fixes.md)：63 项线上检查、三模型有限样本 WER/CER、MOSS SDPA 探针及部署／数据完整性证据。
-- [2026-10-25 平台改进](validation-2026-10-25-platform.md)：A–E 实现、本地控制面性能、六小时资源、浏览器、迁移和回滚演练。
-- [2026-10-25 WSL 平台实机](validation-2026-10-25-wsl-platform.md)：真实 Qwen/MOSS、官方对齐、十分钟工作台、检查点恢复及 GPU 对比。
-- [2026-10-22 工作台本地工程验收](validation-2026-10-22-local-workbench.md)：mock 回归、浏览器流程、账号隔离、备份恢复与未验收项。
-- [2026-10-22 Qwen 质量流程与工作台实机验收](validation-2026-10-22-quality-workbench.md)：13.06 秒样本的真实转录、对齐、别名规范、编辑与字幕导出，不代表长音频质量达标。
-- [2026-07-02 Qwen HF native](validation-2026-07-02-wsl-hf-native.md)：0.6B / 1.7B 的 transformers 后端。
-- [2026-07-10 MOSS](validation-2026-07-10-wsl-moss.md)：独立 smoke、HTTP 路径与卸载。
-- [2026-07-10 稳定性审查](review-2026-07-10-stability-refactor.md)：单 GPU、worker、临时目录和 job 可靠性。
-- [2026-07-15 MOSS long-form](validation-2026-07-15-wsl-moss-long-form.md)：10 / 30 / 60 / 90 分钟、缺尾保护与自动分块。
-- [2026-07-15 Anchor Replay](validation-2026-07-15-wsl-moss-anchor-replay.md)：四说话人跨块解析与对抗性检查。
-- [2026-07-15 四人播客与实时 chunk](validation-2026-07-15-live-chunks-four-speaker-podcast.md)：真实长素材的 partial / mixed 边界与待复验项。
-- [2026-09-19 升级](validation-2026-09-19-upgrade.md)：Qwen 对齐、Context、批量交接及长播客限制。
+- [测试指南](development/testing.md)：CPU／mock、GPU、发布检查及既有测试合并／替代证据。
+- [平台设计](development/platform-design.md)：资源、调度、I/O、注册与诊断的理由。
+- [音频与容量设计](development/audio-storage.md)：持久 MP3、操作 PCM、互斥账本和历史迁移背景。
+- [转录恢复设计](development/transcription-recovery.md)：有界策略、稀疏结果、fence 与自愈。
+- [模型实践](development/asr-model-practices.md)：固定上游实现与选用依据。
+- [新增引擎](development/adding-asr-engine.md)：stub、注册和真实启用门槛。
+- [质量评测](../evaluation/README.md)：独立开发／验收集、CER、术语和字幕。
+- [验收模板](development/validation-template.md)：版本、方法、指标、限制及脱敏证据要求。
+- [未完成事项](development/roadmap.md)：质量、持续运行、平台及历史隐私整改的具体关闭条件。
 
-## 验证工具
+## 历史验收
 
-在 WSL 内运行真实 GPU 工具；无 GPU 环境只运行 mock / unit checks。
+以下记录绑定各自原始版本和环境，不能视为当前 HEAD 的测试证明。文档整理所用源码基线为 `0d329c4c621408f4f49fc4b6b426da3ada61ad0a`，它只标识记录来源，不替代记录中的真实运行 ref／文件摘要。已有未提交差异无法补齐时保持不确定。
 
-- [Qwen 独立 backend smoke](../scripts/qwen_asr_backend_smoke.py)
-- [Qwen 官方对齐器 smoke](../scripts/qwen_forced_alignment_smoke.py)
-- [Qwen 完整音频 / Context / 对齐 pipeline smoke](../scripts/qwen_pipeline_smoke.py)
-- [MOSS 独立 backend smoke](../scripts/moss_backend_smoke.py)
-- [真实 HTTP smoke](../tests/test_http_smoke.py)：配置 `ASR_BASE_URL`；自备音频用 `ASR_HTTP_SMOKE_AUDIO`，Token 用 `ASR_HTTP_SMOKE_TOKEN`。
+原始验收日志、JSON、截图和一次性验证脚本已按维护决定从当前源码树删除，不另做私有副本。精选记录保留方法、指标、失败与限制，并标明其原版本；删除不清除 Git 历史，也不代表已收回外部副本。仓库只分发许可明确的合成样例，自有代码使用 [MIT](../LICENSE)，外部组件与音频生成器见[第三方归属及许可](../THIRD_PARTY_NOTICES.md)。
+
+- [2026-10-27-workbench-console](validation/2026-10-27-workbench-console.md)
+- [2026-10-26-workbench-audio](validation/2026-10-26-workbench-audio.md)
+- [2026-10-26-transcription-resilience](validation/2026-10-26-transcription-resilience.md)
+- [2026-10-25-wsl-platform](validation/2026-10-25-wsl-platform.md)
+- [2026-10-25-workbench-ui](validation/2026-10-25-workbench-ui.md)
+- [2026-10-25-skill-address](validation/2026-10-25-skill-address.md)
+- [2026-10-25-review-fixes](validation/2026-10-25-review-fixes.md)
+- [2026-10-25-platform](validation/2026-10-25-platform.md)
+- [2026-10-25-hcds-rename](validation/2026-10-25-hcds-rename.md)
+- [2026-10-25-agent-skill](validation/2026-10-25-agent-skill.md)
+- [2026-10-22-quality-workbench](validation/2026-10-22-quality-workbench.md)
+- [2026-10-22-local-workbench](validation/2026-10-22-local-workbench.md)
+- [2026-10-10-repository-cleanup](validation/2026-10-10-repository-cleanup.md)
+- [2026-09-19-upgrade](validation/2026-09-19-upgrade.md)
+- [2026-07-15-wsl-moss-long-form](validation/2026-07-15-wsl-moss-long-form.md)
+- [2026-07-15-wsl-moss-anchor-replay](validation/2026-07-15-wsl-moss-anchor-replay.md)
+- [2026-07-15-live-chunks-four-speaker-podcast](validation/2026-07-15-live-chunks-four-speaker-podcast.md)
+- [2026-07-10-wsl-moss](validation/2026-07-10-wsl-moss.md)
+- [2026-07-10-stability-refactor](validation/2026-07-10-stability-refactor.md)
+- [2026-07-02-wsl-hf-native](validation/2026-07-02-wsl-hf-native.md)
 
 ## 维护约定
 
-新增或关闭能力时，同步更新 README、部署指南、Swagger 说明和代理提示词。真实验收另存新的 `validation-YYYY-MM-DD-*.md`，不覆盖旧记录。已完成的临时计划通过 Git 历史追溯，不继续作为现行交接指令。
+当前规则只在对应 reference 与 AGENTS 维护，其他位置使用链接和必要摘要。指南更新随行为变更；设计说明保留取舍，不保留已完成派发清单。历史验收保留失败与限制，新增证据另建绑定版本摘要，不覆盖旧记录。
 
-- [平台运行契约](asr-platform-runtime.md)
-- [平台实现验收](validation-2026-10-25-platform.md)
-- [日志与诊断](asr-diagnostics.md)
-- [新增 ASR 引擎](adding-asr-engine.md)
-- [测试精简去向](asr-platform-test-map.md)
-
-- [工作台 MP3 与存储验收（2026-10-26）](validation-2026-10-26-workbench-audio.md)
+移动／删除前检查源码、测试、CI、动态资源、部署和产品包。生成报告写入忽略的 `artifacts/` 或批准的私有位置；只有精选且获准公开的摘要进入 `validation/`。不创建持续增长的公开原始 archive。

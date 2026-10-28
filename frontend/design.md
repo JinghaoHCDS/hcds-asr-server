@@ -6,7 +6,7 @@ The shared interface system for the existing ASR application. This is an applica
 
 - Direction: 清晰控制台, selected by the user on 2026-10-27.
 - Genre: modern-minimal. Scope: app. Redesign: full.
-- Brand: HCDS Brand DNA 1.3.0, sourced from the existing stylesheet and `../docs/product-workbench.md`.
+- Brand: HCDS Brand DNA 1.3.0, sourced from the existing stylesheet and `../docs/reference/product-workbench.md`.
 - Keep the current navigation destinations, upload lifecycle, queue, transcript virtualizer and responsive transcript/tools switch.
 - Use compact functional headings, horizontal task rows and distinct processing, success, warning, error and neutral states.
 - Job status, audio readiness, transcript completeness and subtitle alignment remain independent.

@@ -10,9 +10,7 @@
 
 [工作台](#使用工作台) · [长转录编辑](#长转录也保持一屏工作区) · [部署](#首次部署) · [官方 Skill](#官方-skill从服务读取用法) · [Agent 接入](#接入-agent) · [验证边界](#验证与边界)
 
-![新版声笺工作台：雾蓝与纸白的素材区，上传音视频、选择领域并填写热词。](docs/validation-artifacts/2026-10-25-workbench-ui/upload-final.png)
 
-<sub>2026-10-25 新版工作台的本地浏览器截图，使用独立测试账号。[手机长转录预览](docs/validation-artifacts/2026-10-25-workbench-ui/mobile-final.png) · [界面与发布验收](docs/validation-2026-10-25-workbench-ui.md)。测试素材用于验证界面，不作为识别质量证据。</sub>
 
 ## 使用工作台
 
@@ -38,9 +36,8 @@
 - **大量片段仍可操作**：动态高度虚拟列表仅渲染视口附近的片段，复核与修改记录分页；复制和导出始终使用完整文本。
 - **手机可用**：在正文和「导出与复核」之间切换，播放器保持可见。
 
-![长转录编辑室：固定播放器、搜索与时间跳转、独立滚动正文和导出侧栏。](docs/validation-artifacts/2026-10-25-workbench-ui/long-desktop.png)
 
-<sub>构造的六小时时间轴、10,800 段界面压力样本。打开时仅挂载 8 段；搜索、跳转至 05:59:50、编辑后保留原稿和全文导出均通过。任务详情仍读取完整正文，虚拟列表减少的是 DOM 与布局量。</sub>
+长转录布局的历史工程范围见[界面验收摘要](docs/validation/2026-10-25-workbench-ui.md)。六小时时间轴属于构造界面样本，不作为识别质量证据。
 
 界面采用 **HCDS 主题**：雾蓝 `#BECBEB`、卡布里蓝 `#0C91FA`、麦黄 `#EBCB75`、墨灰 `#343A46` 与纸白 `#F7F7F4`。**GSAP** 用于页面切换、面板与编辑浮层动效，遵循系统「减少动态效果」设置；字体提供本地回退，不依赖外部字体 CDN。
 
@@ -54,9 +51,9 @@
 
 ## 首次部署
 
-已实机验证 **WSL2 Arch Linux + RTX 5070 Ti 16GB**。先按 [WSL 部署指南](docs/wsl-deployment.md)准备 Windows 驱动、WSL2、systemd、mirrored networking 与防火墙，仅开放 LAN 端口 `18080`。其他显卡和发行版需要各自通过 CUDA 与模型验收。
+已实机验证 **WSL2 Arch Linux + RTX 5070 Ti 16GB**。先按 [WSL 部署指南](docs/guides/wsl-deployment.md)准备 Windows 驱动、WSL2、systemd、mirrored networking 与防火墙，仅开放 LAN 端口 `18080`。其他显卡和发行版需要各自通过 CUDA 与模型验收。
 
-以下为 **WSL Linux 文件系统内的首次安装**。已有服务升级见[发布、备份与回滚](docs/product-workbench.md#发布与回滚)；无 GPU 开发机见[本地开发](#本地开发)。
+以下为 **WSL Linux 文件系统内的首次安装**。已有服务升级见[发布、备份与回滚](docs/reference/product-workbench.md#发布与回滚)；无 GPU 开发机见[本地开发](#本地开发)。
 
 ### 1. 安装服务与网页
 
@@ -75,6 +72,8 @@ bash deploy/wsl-deploy.sh --smoke-audio test-fixtures/audio/test_short.wav
 部署脚本负责 Python 3.12、指定官方 CUDA wheel、模型运行依赖与隔离的质量流程语音检测模型，执行 CUDA、Qwen 独立转录和 HTTP 检查，再启动 systemd user service。
 
 前端构建需单独执行；运行时由 FastAPI 提供 `frontend/dist`，无需常驻 Node 服务。首次使用会下载依赖与模型，离线运行前需先缓存并验证所需模型。
+
+随包短样例为 Flite 合成英文语音，来源、规格和再生成方式见[音频样例说明](test-fixtures/audio/README.md)。它用于连通与工程 smoke，模型和真实对齐仍需在目标环境独立验收。
 
 ### 2. 启用真实对齐，创建账号
 
@@ -192,7 +191,7 @@ curl --noproxy '*' -fsS "$ASR_URL/v1/jobs/JOB_ID?detail=full"
 
 最终正文为 `result.text`，已完成分块的临时文字不替代最终结果。`DELETE /v1/jobs/{id}` 请求安全取消，等待当前模型调用到达安全边界。
 
-`/v1/**` 默认 `quality_profile=legacy`；Qwen 请求可显式传 `quality_profile=quality_v1`，但任务仍按 `/v1` 的内存语义管理。完整参数、生命周期与错误信封见 [API 合约](docs/asr-server-prd.md)和[工作台扩展](docs/product-workbench.md)。
+`/v1/**` 默认 `quality_profile=legacy`；Qwen 请求可显式传 `quality_profile=quality_v1`，但任务仍按 `/v1` 的内存语义管理。完整参数、生命周期与错误信封见 [API 合约](docs/reference/asr-server-prd.md)和[工作台扩展](docs/reference/product-workbench.md)。
 
 ### MCP：在客户端提供八个工具
 
@@ -221,7 +220,7 @@ curl --noproxy '*' -fsS "$ASR_URL/v1/jobs/JOB_ID?detail=full"
 }
 ```
 
-替换仓库路径、Windows IP 和允许读取音频的本地目录。服务启用 Bearer 鉴权时，在 `env` 中增加 `ASR_MCP_TOKEN`。多个允许目录在 POSIX 系统用 `:` 分隔，原生 Windows 用 `;`，JSON 中反斜杠需转义。详见 [MCP 指南](docs/mcp-bridge.md)。
+替换仓库路径、Windows IP 和允许读取音频的本地目录。服务启用 Bearer 鉴权时，在 `env` 中增加 `ASR_MCP_TOKEN`。多个允许目录在 POSIX 系统用 `:` 分隔，原生 Windows 用 `;`，JSON 中反斜杠需转义。详见 [MCP 指南](docs/guides/mcp-bridge.md)。
 
 </details>
 
@@ -248,7 +247,7 @@ output/
     └── transcript.json      # 文字、时间、说话人与诊断信息
 ```
 
-[查看合成输出样例](examples/output-sample/index.md) · [批量清单、口播与播客完整工作流](docs/batch-workflow.md)。`max-in-flight` 控制客户端在途任务数，服务端真实推理仍串行执行。
+[查看合成输出样例](examples/output-sample/index.md) · [批量清单、口播与播客完整工作流](docs/guides/batch-workflow.md)。`max-in-flight` 控制客户端在途任务数，服务端真实推理仍串行执行。
 
 ## 数据与配置
 
@@ -264,33 +263,22 @@ output/
 
 工作台只允许普通用户访问自己的任务。删除覆盖音频、检查点与全部编辑版本。恢复时核对 MP3 摘要、解码规范、PCM 摘要、模型、流程、词库和参数；不匹配则拒绝混用旧检查点，可选择“从头重试”，未完成的模型调用需重做。两条路径的推理临时文件均及时清理。
 
-**schema 4 升级会清除旧工作台任务及其上传和文件，保留账户及公共词库。** 先停准入并等待活跃操作退出、停止服务，保存配套旧源码、前端和完整数据备份，再用 `scripts.workbench_reset_tasks --data-dir ...` 预览，追加 `--apply` 执行离线清除；旧任务不提供 WAV 播放或检查点迁移。回滚须恢复匹配旧代码及迁移前完整数据。发布备份在验收完成后清除本次旧任务数据，操作顺序见[发布与回滚](docs/product-workbench.md#发布与回滚)。
+**当前 schema 4→5 原位保留任务及文件，不执行 `workbench_reset_tasks`。** 其他历史版本、停机备份和匹配回滚见[升级指南](docs/guides/upgrading.md)。
 
 配置从 [.env.example](.env.example)开始。systemd 自动读取项目 `.env`；直接启动 Uvicorn 需显式设置环境变量或传 `--env-file .env`。代码默认 `ASR_ADAPTER=mock`，真实部署使用 `qwen`。对齐与 MOSS 默认关闭，独立验收后再启用。
 
-设置 `ASR_API_TOKEN` 后，HTTP 请求携带 `Authorization: Bearer <token>`；CLI / batch 使用 `ASR_TOKEN`，MCP 使用 `ASR_MCP_TOKEN`。`/health` 和文档保持公开。**Bearer Token 不赋予个人工作台任务的访问权。** 工作台保留与配额配置、离线备份及回滚命令见[工作台契约](docs/product-workbench.md)。
+设置 `ASR_API_TOKEN` 后，HTTP 请求携带 `Authorization: Bearer <token>`；CLI / batch 使用 `ASR_TOKEN`，MCP 使用 `ASR_MCP_TOKEN`。`/health` 和文档保持公开。**Bearer Token 不赋予个人工作台任务的访问权。** 工作台保留与配额配置、离线备份及回滚命令见[工作台契约](docs/reference/product-workbench.md)。
 
 ## 验证与边界
 
 **`quality_v1` 返回 `validated=false`，真实长音频质量仍待验收。** 流程完整覆盖原音，单块最多 180 秒，默认生成预算 4096，并对疑似问题作有界复核。当前默认 60 秒切分尚未被证明最优。
 
-2026-10-25 本轮修复与界面更新的验证范围：
+当前工程和实机结果必须按对应版本读取，不能把历史测试数量当成当前提交通过：
 
-| 验证 | 已取得的证据 |
-| --- | --- |
-| 本地工程 | 393 项测试通过、4 项跳过；mypy 116 个文件、前端生产构建及依赖检查通过 |
-| WSL 线上行为 | 17 项产品回归与 46 项三模型检查通过，覆盖取消／删除清理、字幕导出、编辑对齐、静音、损坏音频、生成截断和模型卸载 |
-| 模型推理实践 | Qwen 使用官方 native helpers；MOSS 真实 CUDA 探针确认语音与文本注意力模块均使用 SDPA |
-| 长转录界面 | 10,800 段构造样本；搜索、远端跳转、版本与完整导出通过，390px 窄屏无整页溢出，减少动效模式生效 |
-
-同一份 **192.94 秒英文朗读拼接样本**：Qwen 1.7B / `quality_v1` 端到端约 14.03 秒、WER 3.22%；MOSS 约 23.33 秒、WER 2.99%。这是模型已加载时的单次有限样本，不能作为自然多人会议、六小时录音的准确率或通用吞吐结论。
-
-- [审查修复与线上实测](docs/validation-2026-10-25-review-fixes.md)：准备阶段取消／删除、动态解码配额、FIFO 回填、可信资产复用和 MOSS 段级字幕修复；包含样本、错误率及部署回滚证据。
-- [已接入模型的推理实践与官方来源](docs/asr-model-practices.md)：输入规范、生成预算、官方对齐、SDPA 和固定版本的代码对照。
-- [新版界面与长转录验收](docs/validation-2026-10-25-workbench-ui.md)：品牌主题、GSAP、虚拟列表、手机布局及静态资源发布记录。
-- [本地工程与浏览器验收](docs/validation-2026-10-22-local-workbench.md)：覆盖 mock、账号隔离、恢复、回听改字、导出和备份；不代表识别精度或手机实机验证。
-- [WSL 实机短音频验收](docs/validation-2026-10-22-quality-workbench.md)：13.06 秒样本通过 Qwen 1.7B 转录、真实对齐、别名规范与字幕导出；仅代表记录中的源码版本和素材。
-- [历史 Qwen / MOSS 记录](docs/README.md#验收记录)：保留对应环境的结果与限制；完整长音频、术语与字幕质量仍需按[独立评测流程](evaluation/README.md)验证。
+- [最新控制台验收](docs/validation/2026-10-27-workbench-console.md)：区分生产空任务页、本机 mock 结果流程和未实际执行的生产回滚。
+- [转录恢复验收](docs/validation/2026-10-26-transcription-resilience.md)：部分结果、故障恢复与四处待人工分类声音；八小时、独立参考集和真实六小时质量未关闭。
+- [MP3 与存储验收](docs/validation/2026-10-26-workbench-audio.md)：真实短样本和工程边界，不代表完整听感或长录音准确率。
+- [历史验证索引](docs/README.md#历史验收)：保留模型、性能、界面、Skill 和失败记录；[未完成事项](docs/development/roadmap.md)列出各项完成条件。
 
 MOSS 提供段级时间与匿名标签，Anchor Replay 最多尝试维护 4 位说话人；仅 `speaker_scope=global` 可按整期一致标签使用，`mixed` / unresolved 保留为未知。4–5 小时整期一致性尚未通过完整素材验收。
 
@@ -320,10 +308,6 @@ ASR_ADAPTER=mock ASR_ENABLE_QWEN_ALIGNMENT=1 \
 
 ---
 
-继续阅读：[部署与排障](docs/wsl-deployment.md) · [工作台与发布](docs/product-workbench.md) · [API 合约](docs/asr-server-prd.md) · [开发约定](AGENTS.md) · [完整文档](docs/README.md)
+继续阅读：[部署与排障](docs/guides/wsl-deployment.md) · [工作台与发布](docs/reference/product-workbench.md) · [API 合约](docs/reference/asr-server-prd.md) · [开发约定](AGENTS.md) · [完整文档](docs/README.md)
 
-模型权重与第三方依赖按各自许可证使用；本仓库尚未声明独立开源许可证。
-
-### 转录异常恢复
-
-工作台保留成功分块，局部缺口后继续处理后续区间，提供标明不完整的 TXT/JSON；仅在全部区间通过后完成任务。空稿可按有依据的语言和有限拆段策略恢复，对齐失败保留原稿。新增 `/readyz`、持久退避、worker 隔离与管理员安全排空。schema 4→5 保留现有数据，无需清空任务。详见 [恢复方案](docs/transcription-resilience-plan.md)和[工作台合约](docs/product-workbench.md#转录恢复与服务就绪)。八小时持续运行、独立参考集准确率及真实六小时质量分别以验收记录为准。
+仓库自有代码采用 [MIT 许可证](LICENSE)。模型权重、第三方依赖及其他外部素材按各自许可证使用，见[第三方归属及许可](THIRD_PARTY_NOTICES.md)。仓库音频使用来源明确的合成样例，原始验收日志、截图和报告已从当前源码树删除；历史内容及作者身份的隐私整改仍单独处理。

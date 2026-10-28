@@ -11,7 +11,7 @@ from typing import Any, Protocol, TypeVar
 
 from asr_server.adapters.base import AudioInput, AsrAdapter, TimestampItem, TranscriptionResult, TranscriptionTimings
 from asr_server.errors import AsrError
-from asr_server.observability import emit
+from asr_server.observability import emit, safe_exception
 from asr_server.registry import Backend, ModelDefinition, ModelStatus
 from asr_server.workers.transport import ProcessRpcTransport
 
@@ -207,7 +207,8 @@ class ModelLifecycleManager:
                     try:
                         await self._unload_now(runtime, cuda_empty_cache=True)
                     except Exception as exc:
-                        logger.warning("failed to unload model during shutdown: %s", exc)
+                        emit("model.shutdown_unload_failed", level=logging.WARNING,
+                             model_id=runtime.definition.id, diagnostics=safe_exception(exc))
                         runtime.status = "error"
                         runtime.rejecting_new_requests = False
 
@@ -217,7 +218,8 @@ class ModelLifecycleManager:
             try:
                 await _call_adapter(runtime.adapter.abort)
             except Exception as exc:
-                logger.warning("failed to abort model worker %s: %s", runtime.definition.id, exc)
+                emit("model.abort_failed", level=logging.WARNING,
+                     model_id=runtime.definition.id, diagnostics=safe_exception(exc))
             async with runtime.lock:
                 runtime.status = "error"
                 runtime.backend = None

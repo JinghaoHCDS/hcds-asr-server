@@ -44,8 +44,8 @@ from asr_server.transcription import (
 )
 
 
-DOCS_DESCRIPTION_PATH = Path(__file__).resolve().parent.parent / "docs" / "docs-endpoint-capabilities.md"
-MCP_TUTORIAL_PATH = Path(__file__).resolve().parent.parent / "docs" / "mcp-bridge.md"
+DOCS_DESCRIPTION_PATH = Path(__file__).resolve().parent.parent / "docs" / "reference" / "docs-endpoint-capabilities.md"
+MCP_TUTORIAL_PATH = Path(__file__).resolve().parent.parent / "docs" / "guides" / "mcp-bridge.md"
 
 
 class EventLoopWatchdog:

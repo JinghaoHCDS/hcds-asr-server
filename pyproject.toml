@@ -3,6 +3,7 @@ name = "asr-server"
 version = "0.1.0"
 description = "LAN ASR service for Agents, powered by Qwen3-ASR and MOSS on NVIDIA GPUs in Windows WSL."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",

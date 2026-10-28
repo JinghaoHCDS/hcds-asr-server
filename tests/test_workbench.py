@@ -119,6 +119,30 @@ async def test_session_isolated_from_bearer_and_cross_origin(workbench: tuple[Fa
     assert (await client.get("/api/auth/me")).status_code == 401
 
 
+@pytest.mark.parametrize("field", ["password", "text"])
+async def test_validation_errors_do_not_echo_password_or_transcript(
+    workbench: tuple[FastAPI, WorkbenchService, AsyncClient],
+    caplog: pytest.LogCaptureFixture, field: str,
+) -> None:
+    _app, _service, client = workbench
+    marker = "private-validation-marker"
+    if field == "password":
+        response = await client.post("/api/auth/login", json={"username": "alice", "password": marker * 100})
+    else:
+        await login(client)
+        response = await client.patch("/api/jobs/missing/segments/0",
+                                      json={"text": marker * 1000, "base_version": 1})
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "bad_request"
+    errors = body["error"]["details"]["errors"]
+    assert errors and errors[0]["loc"] == ["body", field]
+    assert errors[0]["type"] == "string_too_long"
+    assert set(errors[0]) == {"type", "loc", "msg"}
+    assert marker not in response.text and marker not in caplog.text
+
+
 async def test_upload_resume_replay_and_owner_guard(workbench: tuple[FastAPI, WorkbenchService, AsyncClient]) -> None:
     _app, _service, client = workbench
     await login(client)

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import threading
 
 import pytest
 
 from asr_server.adapters.base import AudioInput, TranscriptionResult
 from asr_server.lifecycle import ModelLifecycleManager
+from asr_server.observability import event_record
 from asr_server.registry import default_models
 
 
@@ -221,6 +224,44 @@ async def test_shutdown_unloads_loaded_model() -> None:
     assert runtime.status == "unloaded"
     assert runtime.backend is None
     assert adapter.unloads == 1
+
+
+@pytest.mark.parametrize("operation", ["shutdown", "abort"])
+async def test_shutdown_and_abort_log_only_content_free_diagnostics(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, operation: str,
+) -> None:
+    marker = "private-model-error-marker /private/input.wav"
+    records: list[dict[str, object]] = []
+
+    def record_event(event: str, *, level: int = logging.INFO, **fields: object) -> None:
+        records.append(event_record(event, level=level, **fields))
+
+    class FailingCleanupAdapter(RecordingAdapter):
+        async def unload(self, cuda_empty_cache: bool) -> None:
+            if operation == "shutdown":
+                raise RuntimeError(marker)
+            await super().unload(cuda_empty_cache)
+
+        async def abort(self) -> None:
+            if operation == "abort":
+                raise RuntimeError(marker)
+
+    adapter = FailingCleanupAdapter()
+    manager = ModelLifecycleManager(default_models(), lambda _model_id: adapter)
+    await manager.load_model("qwen3-asr-1.7b", backend="transformers")
+    monkeypatch.setattr("asr_server.lifecycle.emit", record_event)
+    if operation == "shutdown":
+        await manager.shutdown()
+        expected_event = "model.shutdown_unload_failed"
+    else:
+        await manager.abort_all_workers()
+        expected_event = "model.abort_failed"
+
+    failures = [record for record in records if record["event"] == expected_event]
+    assert failures and all(record["error_type"] == "RuntimeError" for record in failures)
+    assert all(record["error_chain"] for record in failures)
+    assert marker not in json.dumps(records) and marker not in caplog.text
+    assert manager.runtime_for("qwen3-asr-1.7b").status == "error"
 
 
 async def test_new_transcription_resets_idle_unload_timer() -> None:

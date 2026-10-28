@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -113,7 +113,8 @@ async def test_fatal_circuit_is_bounded_and_closes_only_after_real_success(monke
     assert manager.inference_readiness()["ready"]  # reading does not consume probe
     adapter.fail = False
     await infer()
-    assert manager.worker_diagnostics()["models"][0]["consecutive_failures"] == 0
+    models = cast(list[dict[str, object]], manager.worker_diagnostics()["models"])
+    assert models[0]["consecutive_failures"] == 0
     await manager.shutdown()
 
 

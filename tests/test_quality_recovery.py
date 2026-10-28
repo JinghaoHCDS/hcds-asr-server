@@ -293,6 +293,7 @@ async def test_head_v14_legacy_prefix_is_immutable_and_only_new_language_action_
     adapter = Adapter()
     manager = ModelLifecycleManager(default_models(enable_qwen_alignment=True), lambda _: adapter, idle_unload_seconds=0)
     parameters = request()
+    assert parameters.model is not None
     definition = manager.runtime_for(parameters.model).definition
     frozen_request = asdict(parameters)
     frozen_request.pop("idempotency_key", None)
@@ -344,7 +345,10 @@ async def test_head_v14_legacy_prefix_is_immutable_and_only_new_language_action_
             assert result["quality"]["review_audio_seconds"] == 30  # type: ignore[index]
             assert result["quality"]["fingerprint"] == identity  # type: ignore[index]
         assert len(adapter.windows) == total - completed
-        assert adapter.windows[0] == (completed * 10, (completed + 1) * 10, "zh")
+        first_start, first_end, first_language = adapter.windows[0]
+        assert first_start == completed * 10
+        assert first_end == (completed + 1) * 10
+        assert first_language == "zh"
         assert all(file_digest(directory / f"chunk-{i:05d}.json") == digest for i, digest in hashes.items())
         recovered = Checkpoints(directory, identity)
         assert recovered.action_count(completed) == 3

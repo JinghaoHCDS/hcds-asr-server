@@ -1,12 +1,0 @@
-torch: 2.11.0+cu128
-torch cuda: 12.8
-cuda available: True
-device: NVIDIA GeForce RTX 5070 Ti
-capability: (12, 0)
-transformers: 5.18.0.dev0
-Loading weights:   0%|          | 0/611 [00:00<?, ?it/s]Loading weights:  22%|██▏       | 134/611 [00:00<00:00, 1337.89it/s]Loading weights:  44%|████▍     | 268/611 [00:00<00:00, 1264.58it/s]Loading weights:  65%|██████▍   | 395/611 [00:00<00:00, 1207.20it/s]Loading weights: 100%|██████████| 611/611 [00:00<00:00, 1461.75it/s]
-model: Qwen/Qwen3-ASR-0.6B-hf
-backend: transformers
-loader: hf-native
-output language: Chinese
-text first 200: 你好，你好，你好。这个是测试音频，主要用于测试千问 ASR 模型 1.7B 的实际转录能力。

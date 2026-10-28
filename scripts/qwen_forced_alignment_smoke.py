@@ -22,6 +22,7 @@ from scripts.qwen_asr_backend_smoke import (
 
 from asr_server.registry import ALIGNER_SOURCE
 from asr_server.adapters.qwen import _qwen_prefill_chat_template
+from scripts.validation_output import add_report_arguments, emit_report, safe_language, text_metrics, validate_report_output
 
 ALIGNER_MODEL, ALIGNER_REVISION = ALIGNER_SOURCE
 
@@ -112,18 +113,14 @@ def run(args: argparse.Namespace) -> None:
         raise RuntimeError("forced aligner returned an invalid interval")
     alignment_seconds = perf_counter() - align_started
 
-    print("asr_model:", args.asr_model)
-    print("asr_revision:", asr_revision)
-    print("aligner_model:", ALIGNER_MODEL)
-    print("aligner_revision:", ALIGNER_REVISION)
-    print("language:", language)
-    print("transcript first 200:", transcript[:200])
-    print("aligned item count:", len(aligned))
-    print("aligned first 20:", json.dumps(aligned[:20], ensure_ascii=False))
-    print("asr seconds:", round(asr_seconds, 3))
-    print("alignment load+inference seconds:", round(alignment_seconds, 3))
-    print("peak VRAM allocated MiB:", round(torch.cuda.max_memory_allocated(args.device) / 1024 / 1024, 2))
-    print("peak VRAM reserved MiB:", round(torch.cuda.max_memory_reserved(args.device) / 1024 / 1024, 2))
+    emit_report({"asr_model": args.asr_model, "asr_revision": asr_revision,
+                 "aligner_model": ALIGNER_MODEL, "aligner_revision": ALIGNER_REVISION,
+                 "language": safe_language(language), **text_metrics(transcript, "transcript"), "aligned_items": len(aligned),
+                 "asr_seconds": round(asr_seconds, 3), "alignment_seconds": round(alignment_seconds, 3),
+                 "peak_vram_allocated_mib": round(torch.cuda.max_memory_allocated(args.device) / 1024 / 1024, 2),
+                 "peak_vram_reserved_mib": round(torch.cuda.max_memory_reserved(args.device) / 1024 / 1024, 2)},
+                output=getattr(args, "output", None), content={"transcript": transcript, "aligned": aligned},
+                include_content=getattr(args, "include_content", False))
 
 
 def parse_args() -> argparse.Namespace:
@@ -136,14 +133,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda", choices=["cuda", "cuda:0"])
     parser.add_argument("--dtype", default="auto")
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    add_report_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if not args.audio.is_file():
-        raise FileNotFoundError(args.audio)
-    run(args)
+    try:
+        validate_report_output(args.output, include_content=args.include_content)
+        if not args.audio.is_file():
+            raise ValueError("audio must be a file")
+        run(args)
+    except Exception as exc:
+        raise SystemExit(f"forced alignment smoke failed ({type(exc).__name__})") from None
 
 
 if __name__ == "__main__":

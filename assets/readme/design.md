@@ -4,7 +4,7 @@
 
 - Audience: 局域网内使用浏览器的内容工作者，以及接入 HTTP / MCP 的 Agent 开发者。
 - One-sentence value: 把一台 Windows + NVIDIA + WSL 电脑变成可回听、校对、导出字幕的共享转录服务。
-- Primary proof: 2026-10-25 新版工作台截图、63 项线上检查和有限参考文本样本；界面压力样本不作为 ASR 质量证据。
+- Primary proof: 精选历史验收摘要和明确的验证边界；历史测试数量与界面压力样本不作为当前版本或 ASR 质量证据。
 - First successful action: 已部署用户登录工作台、上传素材并导出；新部署者先完成 GPU 与对齐验收、构建网页、创建管理员。
 - Visual theme: 声笺工作台的 HCDS 雾蓝、纸白界面，音频波形与可编辑文字之间的转换。
 
@@ -20,9 +20,9 @@
 
 - `workbench-hero.svg`: 项目标题、平台与上传—转录—校对—导出的概念流程，不是运行状态或识别证据。
 - `service-map.svg`: 浏览器及 Agent 两种入口、同端口 FastAPI、共享 FIFO、WSL GPU 的简化架构。
-- UI screenshot: `docs/validation-artifacts/2026-10-25-workbench-ui/upload-final.png` 与 `long-desktop.png`。测试账号与构造界面样本，图注标明来源及证据边界。
+- Historical screenshots: 原始截图已按维护决定删除，README 不继续引用；新增展示只使用明确标注的合成账号和内容，不能虚构为真实运行证据。
 - UI tokens: `frontend/src/styles.css` and `frontend/src/icons.tsx`.
-- Product facts: `AGENTS.md`, `docs/product-workbench.md`, `docs/asr-server-prd.md`, deployment scripts and source code.
+- Product facts: `AGENTS.md`, `docs/reference/product-workbench.md`, `docs/reference/asr-server-prd.md`, deployment scripts and source code.
 - Previous `hero.svg` is retained as an existing source asset; the current README uses the new workbench hero.
 
 ## Maintenance

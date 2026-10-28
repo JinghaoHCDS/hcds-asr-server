@@ -11,6 +11,7 @@ if __package__ in {None, ""}:
 
 from asr_server.adapters.qwen import _qwen_prefill_chat_template
 from asr_server.registry import MODEL_SOURCES
+from scripts.validation_output import add_report_arguments, emit_report, safe_language, text_metrics, validate_report_output
 
 
 DEFAULT_MODEL = MODEL_SOURCES["qwen3-asr-0.6b"][0]
@@ -67,13 +68,11 @@ def parsed_language(result: object) -> str:
 
 
 def print_result_summary(args: argparse.Namespace, *, language: str, text: str) -> None:
-    print("model:", args.model)
-    print("backend:", args.backend)
-    print("loader: hf-native")
-    print("output language:", language)
-    print("text first 200:", text[:200])
     if not text.strip():
         raise RuntimeError(f"hf-native {args.backend} 后端转录结果为空")
+    emit_report({"model": args.model, "backend": args.backend, "loader": "hf-native",
+                 "language": safe_language(language), **text_metrics(text)}, output=getattr(args, "output", None),
+                content={"text": text}, include_content=getattr(args, "include_content", False))
 
 
 def run_hf_native_transformers(args: argparse.Namespace) -> None:
@@ -146,14 +145,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--prompt", default="")
     parser.add_argument("--reject-hallucinated-term")
+    add_report_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if not args.audio.exists():
-        raise FileNotFoundError(args.audio)
-    run_hf_native_transformers(args)
+    try:
+        validate_report_output(args.output, include_content=args.include_content)
+        if not args.audio.is_file():
+            raise ValueError("audio must be a file")
+        run_hf_native_transformers(args)
+    except Exception as exc:
+        raise SystemExit(f"Qwen backend smoke failed ({type(exc).__name__})") from None
 
 
 if __name__ == "__main__":

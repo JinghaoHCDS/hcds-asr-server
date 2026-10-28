@@ -11,6 +11,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from asr_server.registry import MOSS_MODEL_ID, MODEL_SOURCES
+from scripts.validation_output import add_report_arguments, emit_report, safe_language, text_metrics, validate_report_output
 
 
 DEFAULT_MODEL, DEFAULT_REVISION = MODEL_SOURCES[MOSS_MODEL_ID]
@@ -113,24 +114,18 @@ def run_smoke(args: argparse.Namespace) -> None:
     generated_tokens = result_int(result, "generated_tokens")
     peak_vram_allocated_mb = torch.cuda.max_memory_allocated(device) / 1024 / 1024
 
-    print("model:", args.model)
-    print("revision:", args.revision)
-    print("language request:", args.language)
-    print("backend: transformers")
-    print("loader: hf-remote-code")
-    print("max_new_tokens:", args.max_new_tokens)
-    print("prompt tokens:", prompt_tokens)
-    print("generated tokens:", generated_tokens)
-    print("peak VRAM allocated MiB:", round(peak_vram_allocated_mb, 2))
-    print("text first 200:", text[:200])
-    print("parsed segment count:", len(segments))
-    if segments:
-        print("first segment:", segment_to_dict(segments[0]))
-        print("last segment:", segment_to_dict(segments[-1]))
     if not text.strip():
         raise RuntimeError("MOSS transformers 后端转录结果为空")
     if generated_tokens is not None and generated_tokens >= args.max_new_tokens:
         raise RuntimeError("MOSS generation reached max_new_tokens; transcript may be truncated")
+    emit_report({"model": args.model, "revision": args.revision, "language": safe_language(args.language),
+                 "backend": "transformers", "loader": "hf-remote-code", "max_new_tokens": args.max_new_tokens,
+                 "prompt_tokens": prompt_tokens, "generated_tokens": generated_tokens,
+                 "peak_vram_allocated_mib": round(peak_vram_allocated_mb, 2),
+                 "segments": len(segments), **text_metrics(text)},
+                output=getattr(args, "output", None),
+                content={"text": text, "segments": [segment_to_dict(s) for s in segments]},
+                include_content=getattr(args, "include_content", False))
 
 
 def parse_args() -> argparse.Namespace:
@@ -151,14 +146,19 @@ def parse_args() -> argparse.Namespace:
             "正文为对应的语音内容，并在段末标注结束时间戳，以清晰标明该段语音范围。"
         ),
     )
+    add_report_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if not args.audio.exists():
-        raise FileNotFoundError(args.audio)
-    run_smoke(args)
+    try:
+        validate_report_output(args.output, include_content=args.include_content)
+        if not args.audio.is_file():
+            raise ValueError("audio must be a file")
+        run_smoke(args)
+    except Exception as exc:
+        raise SystemExit(f"MOSS backend smoke failed ({type(exc).__name__})") from None
 
 
 if __name__ == "__main__":

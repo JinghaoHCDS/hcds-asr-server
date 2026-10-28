@@ -773,7 +773,7 @@ def _qwen_prefill_chat_template(processor: Any) -> str:
 class _HfNativeQwenModel:
     """Native helper flow following the official -hf model card.
 
-    See docs/asr-model-practices.md for source pins and why the pinned
+    See docs/development/asr-model-practices.md for source pins and why the pinned
     template needs a prefill compatibility wrapper; don't replace it with
     generic instruction prompting or sample the decoder for transcription.
     """
