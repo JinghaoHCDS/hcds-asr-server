@@ -21,7 +21,13 @@ def test_published_fixture_has_consistent_synthetic_provenance_and_reference() -
     assert info["sha256"] == hashlib.sha256(OUTPUT.read_bytes()).hexdigest()
     assert info["reference_sha256"] == hashlib.sha256(REFERENCE.read_bytes()).hexdigest()
     assert info["reference_file"] == REFERENCE.name
-    assert info["quality_validation"] == "not_run_on_real_asr_or_forced_alignment"
+    assert info["quality_validation"] in {
+        "not_run_on_real_asr_or_forced_alignment", "short_qwen_workbench_gpu_smoke_passed",
+    }
+    if info["quality_validation"] == "short_qwen_workbench_gpu_smoke_passed":
+        record = (OUTPUT.parent / info["validation_record"]).resolve()
+        assert record.is_relative_to(OUTPUT.parents[2] / "docs" / "validation")
+        assert record.is_file()
     with wave.open(str(OUTPUT), "rb") as audio:
         assert (audio.getnchannels(), audio.getsampwidth(), audio.getframerate()) == (1, 2, 16000)
         assert audio.getnframes() == info["frames"]

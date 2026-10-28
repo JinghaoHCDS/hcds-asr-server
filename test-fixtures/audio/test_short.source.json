@@ -18,5 +18,6 @@
   "sha256": "56717d7e62e209e426d939d33334643cc682fac6b0bbd1f436cea090b37e5ad1",
   "license": "MIT",
   "third_party_notices": "../../THIRD_PARTY_NOTICES.md",
-  "quality_validation": "not_run_on_real_asr_or_forced_alignment"
+  "quality_validation": "short_qwen_workbench_gpu_smoke_passed",
+  "validation_record": "../../docs/validation/2026-10-28-repository-governance.md"
 }

@@ -36,6 +36,7 @@
 
 原始验收日志、JSON、截图和一次性验证脚本已按维护决定从当前源码树删除，不另做私有副本。精选记录保留方法、指标、失败与限制，并标明其原版本；删除不清除 Git 历史，也不代表已收回外部副本。仓库只分发许可明确的合成样例，自有代码使用 [MIT](../LICENSE)，外部组件与音频生成器见[第三方归属及许可](../THIRD_PARTY_NOTICES.md)。
 
+- [2026-10-28-repository-governance](validation/2026-10-28-repository-governance.md)
 - [2026-10-27-workbench-console](validation/2026-10-27-workbench-console.md)
 - [2026-10-26-workbench-audio](validation/2026-10-26-workbench-audio.md)
 - [2026-10-26-transcription-resilience](validation/2026-10-26-transcription-resilience.md)

@@ -1,6 +1,6 @@
 # Synthetic audio test fixture
 
-`test_short.wav` is newly synthesized English speech for engineering smoke tests. It replaces the former user-provided 13.06-second recording; it is not a new GPU or recognition-quality acceptance result.
+`test_short.wav` is synthetic English speech for engineering smoke tests. It replaces the former user-provided 13.06-second recording. The committed file passed a short Qwen workbench GPU smoke on 2026-10-28; this is not general recognition-quality acceptance.
 
 | Property | Value |
 | --- | --- |
@@ -32,7 +32,9 @@ The generator loads only the reference text, asks the local `kal` voice to write
 
 ## Validation scope
 
-The file format, source record, reference digest and local mock workflow are checked. Actual Qwen/MOSS recognition, forced-alignment accuracy and listening quality for this new synthetic sample have **not** been validated on a GPU. Historical timings, transcripts and quality measurements used the retired recording and cannot be reproduced by substituting this file.
+The file format, source record, reference digest and local mock workflow are checked. A real HTTP workbench smoke with Qwen3-ASR 1.7B and the official ForcedAligner passed on WSL: 28 normalized reference words, zero word edits, aligned timestamps, all four exports, MP3 Range playback, and realignment after an edit. The temporary test task was deleted. See the [version-bound validation record](../../docs/validation/2026-10-28-repository-governance.md).
+
+This short engineering result does not validate timestamp accuracy by human review, listening quality, MOSS, long-form quality or sustained operation. Historical timings, transcripts and quality measurements used the retired recording and cannot be reproduced by substituting this file. Regeneration writes an unvalidated source record for the newly generated output; retain acceptance claims only with matching audio and version evidence.
 
 ```bash
 uv run --frozen python scripts/asr_client.py --base-url http://127.0.0.1:18080 transcribe test-fixtures/audio/test_short.wav --model qwen3-asr-1.7b --backend auto

@@ -63,7 +63,7 @@ Ubuntu 再执行同样的 `mkdir`、`git clone` 和 `cd`。后续部署命令使
 
 ## 3. 首次部署 Qwen
 
-准备一小段自己有权使用的语音，例如 `$HOME/audio/smoke.wav`，包含清晰讲话；仓库提供短合成英文样例 `test-fixtures/audio/test_short.wav`，来源、规格与再生成方式见[样例说明](../../test-fixtures/audio/README.md)，许可见[第三方归属](../../THIRD_PARTY_NOTICES.md)。当前合成样例尚未取得独立真实 GPU 验收，不能套用旧录音的历史结果。首次部署会下载运行时依赖和模型，需联网并留出充足磁盘空间。
+准备一小段自己有权使用的语音，例如 `$HOME/audio/smoke.wav`，包含清晰讲话；仓库提供短合成英文样例 `test-fixtures/audio/test_short.wav`，来源、规格与再生成方式见[样例说明](../../test-fixtures/audio/README.md)，许可见[第三方归属](../../THIRD_PARTY_NOTICES.md)。该样例已通过既有 WSL 环境中的短工作台 GPU smoke，见[版本记录](../validation/2026-10-28-repository-governance.md)；首次部署仍须独立完成 CUDA、后端与对齐验收，不能套用旧录音结果或短样例声明长音频质量。首次部署会下载运行时依赖和模型，需联网并留出充足磁盘空间。
 
 ```bash
 bash deploy/wsl-deploy.sh \
