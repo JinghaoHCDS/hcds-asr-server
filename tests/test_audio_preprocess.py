@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 from functools import partial
 from tests.helpers import make_wav as shared_wav
 import wave
@@ -155,9 +156,13 @@ async def test_normalized_asset_reuse_verifies_pcm_identity_without_owning_sourc
     assert asset.duration == pytest.approx(0.2)
     asset.validate()
     # Changing a sample invalidates reuse even when size, rate and frames match.
+    original_stat = output.stat()
     with output.open("r+b") as audio:
         audio.seek(44)
         audio.write(b"\x01\x00")
+    # Writes within one filesystem clock tick can retain the cached timestamps.
+    # Explicitly invalidate that fast path so this exercises PCM digest checking.
+    os.utime(output, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 1_000_000_000))
     with pytest.raises(AsrError) as error:
         asset.validate()
     assert error.value.code == "normalized_asset_invalid"
