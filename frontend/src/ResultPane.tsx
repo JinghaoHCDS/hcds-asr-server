@@ -1,8 +1,9 @@
 import VideoProgress from './VideoProgress';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, bytes, clock, date, errorNames, jobDetail, message, phaseName, terminal, canRetry, retryFromStart, retryLabel, progressText, completeness, jobStatusLabel, showingVideoProgress, videoPending, type Issue, type Job, type ModelOption, type Segment } from './api';
+import { api, bytes, clock, date, errorNames, jobDetail, message, pendingSpeaker, phaseName, terminal, canRetry, retryFromStart, retryLabel, progressText, completeness, jobStatusLabel, showingVideoProgress, videoPending, type Issue, type Job, type ModelOption, type Segment } from './api';
 import { Icon } from './icons';
 import SpeakerTools from './SpeakerTools';
+import ReplaceTools from './ReplaceTools';
 import Transcript, { VirtualText } from './Transcript';
 import { useEntrance } from './motion';
 
@@ -74,7 +75,8 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
   const etag = useRef<{ id: string; value?: string }>({ id: jobId });
   const selectedId = useRef(jobId); selectedId.current = jobId;
   const capabilities = models.find(model => model.id === job?.model)?.capabilities;
-  const canEdit = !!(capabilities?.forced_alignment || capabilities?.segment_timestamps) && job?.status === 'completed' && job.result?.alignment_status !== 'pending';
+  const editable = job?.status === 'completed' && job.result?.alignment_status !== 'pending';
+  const canEdit = !!(capabilities?.forced_alignment || capabilities?.segment_timestamps) && editable;
   const canSubtitle = !!(capabilities?.forced_alignment || capabilities?.segment_timestamps);
   useEffect(() => { if (!canSubtitle) setFormat('md'); }, [canSubtitle]);
 
@@ -83,11 +85,13 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
       const next = await jobDetail(jobId, etag.current.id === jobId ? etag.current.value : undefined);
       if (selectedId.current !== jobId) return;
       etag.current = { id: jobId, value: next.etag };
-      if (next.job) {
-        const signature = `${next.job.id}:${next.job.status}:${next.job.result?.alignment_status}:${next.job.audio_asset?.state}`;
+      const loaded = next.job;
+      if (loaded) {
+        const signature = `${loaded.id}:${loaded.status}:${loaded.result?.alignment_status}:${loaded.audio_asset?.state}`;
         if (observed.current && observed.current !== signature) changed.current();
         observed.current = signature;
-        setJob(next.job);
+        setJob(current => current?.id === loaded.id && ((current.result?.version ?? 0) > (loaded.result?.version ?? 0)
+          || (current.revision ?? 0) > (loaded.revision ?? 0)) ? current : loaded);
       }
       setError('');
     } catch (e) { if (selectedId.current === jobId) setError(message(e)); }
@@ -135,6 +139,15 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
     catch (e) { setError(message(e)); }
   }
   function speakersSaved(next: Job) { setJob(next); etag.current = {id: jobId}; onChanged(); }
+  async function bulkEdit(path: string, fields: Record<string, unknown>, success: string) {
+    const version = job?.result?.version;
+    const next = await api<Job>(`/jobs/${jobId}/${path}`, {
+      method: 'POST', body: JSON.stringify({ ...fields, base_version: version }),
+    });
+    if (selectedId.current !== jobId) return;
+    speakersSaved(next);
+    setNotice(next.result?.alignment_status === 'pending' ? `${success}，正在更新字幕对齐。` : `${success}。`);
+  }
   function seek(seconds: number) { setJump(previous => ({ seconds, serial: (previous?.serial ?? 0) + 1 })); setPosition(seconds); if (!audioReady && !useVideo) { setNotice('媒体正在准备。'); return; } const player = media(); if (player) { player.currentTime = Math.max(0, seconds + (useVideo ? offset : 0)); void player.play().catch(() => setNotice('请点击播放器的播放按钮。')); } }
   function beginEdit(segment: Segment) { setEdit(segment); setEditBaseVersion(job?.result?.version ?? 1); setDraft(segment.text); setSpeakerDraft(segment.speaker_id || ''); setError(''); }
   async function save() {
@@ -224,8 +237,13 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
       </div>
       <div className="result-document">{result ? <section className="panel transcript-panel" aria-label="转录正文"><div className="document-toolbar"><div className="segmented" role="group" aria-label="文本视图"><button type="button" className={!raw ? 'selected' : ''} aria-pressed={!raw} onClick={() => setRaw(false)}>交付稿</button><button type="button" className={raw ? 'selected' : ''} aria-pressed={raw} onClick={() => setRaw(true)}>模型原稿</button></div><div className="document-tools"><span className="subtle-label">当前 v{result.version}</span><button type="button" className="button ghost small" onClick={() => void copy()}>复制全文</button></div></div>
         {incomplete && <p className="document-warning" role="status">部分声音待回听确认，当前为不完整结果。</p>}
-        {result.speaker_count_mismatch && <p className="footnote">检测到的人物数量与预计 {result.expected_speakers} 人不同，请回看确认。</p>}{result.diarization?.status === 'partial' && <p className="footnote">部分跨分块人物归属待确认，可逐段校正。</p>}
-        {segments.length ? <Transcript speakers={result.speakers} segments={segments} raw={raw} position={position} seek={seek} onEdit={canEdit ? beginEdit : undefined} issues={issues} jump={jump} /> : <VirtualText text={(raw ? result.raw_text || result.text : result.text) || ''} />}
+        {result.speaker_count_mismatch && <p className="footnote">检测到的人物数量与预计 {result.expected_speakers} 人不同，请回看确认。</p>}
+        {result.diarization?.status === 'partial' && segments.some(s => pendingSpeaker(s, result.speakers || {}, raw)) && <p className="footnote">部分片段归属待确认{editable && !raw ? '，可筛选「待确认」后批量指派' : ''}。</p>}
+        {segments.length ? <Transcript speakers={result.speakers} segments={segments} raw={raw} position={position} seek={seek}
+          onEdit={canEdit ? beginEdit : undefined} issues={issues} jump={jump}
+          onAssign={editable && capabilities?.diarization && !edit
+            ? (ids, speakerId) => bulkEdit('speakers/assign-pending', { segment_ids: ids, speaker_id: speakerId }, `已指派 ${ids.length} 段`) : undefined}
+        /> : <VirtualText text={(raw ? result.raw_text ?? result.text : result.text) || ''} />}
       </section> : <section className="panel waiting-result" role="status"><Icon name="wave" size={34} /><h3>{job.status === 'failed' ? '任务未完成' : job.status === 'cancelled' ? '任务已取消' : job.status === 'expired' ? '任务已过期' : job.status === 'completed' ? '暂无可用文字' : '等待转录结果'}</h3><p>{job.status === 'failed' ? '已有处理进度会保留。返回任务列表查看错误或重试。' : terminal(job.status) ? '此任务暂无可用结果，请返回任务列表查看任务状态。' : '任务完成后，回听、校对和导出工具会显示在这里。'}</p>{job.progress?.text && <div className="partial-text"><strong>已保存片段，仍有声音待确认</strong><VirtualText text={job.progress.text} /><div className="partial-export"><select aria-label="部分结果格式" value={partialFormat} onChange={e => setPartialFormat(e.target.value)}><option value="txt">TXT 含待确认区间</option><option value="json">JSON 含完整性信息</option></select><button type="button" className="button secondary small" disabled={exporting} aria-busy={exporting} onClick={() => void download()}>{exporting ? '正在导出…' : '导出部分结果'}</button></div></div>}</section>}</div></div>
     </>}
     </div>
@@ -233,6 +251,8 @@ export default function ResultPane({ jobId, models, onBack, onChanged }: { jobId
 <aside ref={tools} id="review-tools" className="result-aside" role="dialog" aria-modal="true" aria-labelledby="review-tools-title">
         <div className="tools-heading"><h2 id="review-tools-title">工具</h2><button ref={toolsClose} type="button" className="icon-button" aria-label="关闭工具" onClick={() => setToolsOpen(false)}><Icon name="close" size={20} /></button></div>
         {error && <div className="banner error" role="alert"><Icon name="alert" size={18} /><span>{error}</span></div>}
+        <ReplaceTools key={jobId} result={result} disabled={!editable || !!edit}
+          onReplace={(find, replacement) => bulkEdit('replace-text', { find, replacement }, '已替换并保存新版本')} />
         {capabilities?.diarization && <SpeakerTools job={job} onSaved={speakersSaved} disabled={!canEdit || !!edit} />}<section className="panel export-panel"><div className="section-heading"><h3>导出结果</h3><Icon name="download" size={19} /></div><label className="field-label">文本版本<select value={exportVersion ?? result.version} onChange={e => setExportVersion(Number(e.target.value))}>{(result.versions?.length ? result.versions : [{ version: result.version, created_at: '', alignment_status: result.alignment_status }]).map(v => <option key={v.version} value={v.version}>v{v.version}{v.version === result.version ? '（当前版本）' : ''}{v.alignment_status === 'pending' ? ' 字幕更新中' : ''}</option>)}</select></label><label className="field-label">文件格式<select value={format} onChange={e => setFormat(e.target.value)}><option value="md">Markdown 对话稿（供 Agent 分析）</option><option value="txt">TXT 纯文本</option>{canSubtitle && <><option value="srt">SRT 字幕</option><option value="vtt">VTT 网页字幕</option></>}<option value="json">JSON 完整结果</option></select></label><button type="button" className="button primary wide" disabled={exporting || subtitleBlocked} aria-busy={exporting} aria-describedby={subtitleBlocked ? 'subtitle-blocked-reason' : undefined} onClick={() => void download()}><Icon name="download" size={17} />{exporting ? '正在导出…' : '下载所选版本'}</button>{subtitleBlocked && <p className="footnote" id="subtitle-blocked-reason">{incomplete ? '此结果仍有待确认区间，字幕暂不可导出，可先导出含区间说明的 TXT / JSON。' : versionStatus === 'failed' ? '此版本字幕对齐失败，可先导出文字或选择此前已对齐的版本。' : '字幕正在更新，可先导出文字或选择此前已对齐的版本。'}</p>}<p className="footnote">{incomplete ? '部分导出会保留完整性标记及待确认区间的时间。' : '导出使用所选版本的交付稿。'}模型原稿可在正文区查看、复制，也保留在完整 JSON 中。</p></section>
         {result.alignment_status !== 'aligned' && !segmentTimed && <div className="banner neutral" role="status"><Icon name="refresh" size={18} /><span>{result.alignment_status === 'pending' ? '字幕更新中' : '字幕暂未完成对齐'}</span></div>}
         <section className="panel review-panel"><div className="section-heading"><h3>回听清单</h3><span className="count">{issues.length}</span></div>{issues.length === 0 ? <p className="muted">系统未标记待复核问题。你仍可以回听音频进行校对。</p> : <div className="issue-list">{issues.slice(issuePage * 20, (issuePage + 1) * 20).map((issue, i) => <button type="button" className="issue-item" key={i} onClick={() => { seek(typeof issue !== 'string' ? issue.start ?? 0 : 0); setToolsOpen(false); }}><Icon name="alert" size={17} /><span><strong>{typeof issue !== 'string' && issue.start !== undefined ? clock(issue.start) : '需要确认'}</strong><small>{issueText(issue)}</small></span><Icon name="play" size={12} /></button>)}</div>}{issues.length > 20 && <Pager page={issuePage} count={issues.length} setPage={setIssuePage} />}</section>

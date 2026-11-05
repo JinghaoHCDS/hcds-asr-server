@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
-import { clock, speakerColor, type Speaker, type Issue, type Segment } from './api';
+import { clock, message, pendingSpeaker, speakerColor, type Speaker, type Issue, type Segment } from './api';
 import { Icon } from './icons';
 
 // Invalidate offscreen sizes, then restore mounted sizes: clearing the cache
@@ -37,18 +37,32 @@ export function VirtualText({ text }: { text: string }) {
   </div></div>;
 }
 
-export default function Transcript({ segments, raw, position, seek, onEdit, issues, jump, speakers = {} }: {
+export default function Transcript({ segments, raw, position, seek, onEdit, onAssign, issues, jump, speakers }: {
   segments: Segment[]; speakers?: Record<string, Speaker>; raw: boolean; position: number; seek: (seconds: number) => void;
   onEdit?: (segment: Segment) => void; issues: (Issue | string)[]; jump: { seconds: number; serial: number } | null;
+  onAssign?: (segmentIds: string[], speakerId: string) => Promise<void>;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState(''); const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase());
   const [follow, setFollow] = useState(false); const [match, setMatch] = useState(0);
   const [person, setPerson] = useState('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [assignee, setAssignee] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState('');
   const personId = (segment: Segment) => raw ? segment.model_speaker_id : segment.speaker_id;
   const [time, setTime] = useState(''); const [timeError, setTimeError] = useState('');
   const rows = useMemo(() => segments.map((segment, index) => ({ segment, index }))
-    .filter(({ segment }) => (person === 'all' || (personId(segment) || 'unknown') === person) && (!deferredQuery || (raw ? segment.raw_text || segment.text : segment.text).toLocaleLowerCase().includes(deferredQuery))), [segments, raw, deferredQuery, person]);
+    .filter(({ segment }) => (person === 'all' || (person === 'unknown'
+      ? pendingSpeaker(segment, speakers || {}, raw)
+      : (raw ? segment.model_speaker_id : segment.speaker_id) === person))
+      && (!deferredQuery || (raw ? segment.raw_text ?? segment.text : segment.text).toLocaleLowerCase().includes(deferredQuery))),
+    [segments, raw, deferredQuery, person, speakers]);
+  const selectedIds = useMemo(() => rows.filter(({ segment }) => selected.has(segment.id)).map(({ segment }) => segment.id),
+    [rows, selected]);
+  const people = Object.entries(speakers || {});
+  const canAssign = !!onAssign && !raw && person === 'unknown' && people.length > 0;
+  const filterSettled = deferredQuery === query.trim().toLocaleLowerCase();
   const list = useVirtualizer({ count: rows.length, getScrollElement: () => root.current, estimateSize: () => 112, overscan: 4,
     getItemKey: index => rows[index].segment.id || rows[index].index });
   useRemeasureOnWidth(root, list);
@@ -56,6 +70,7 @@ export default function Transcript({ segments, raw, position, seek, onEdit, issu
   const pendingJump = useRef<number | null>(null);
 
   useEffect(() => { setMatch(0); root.current?.scrollTo({ top: 0 }); }, [deferredQuery, raw]);
+  useEffect(() => { setSelected(new Set()); setAssignError(''); }, [query, person, raw]);
   useEffect(() => {
     if (jump) {
       pendingJump.current = jump.seconds;
@@ -92,6 +107,15 @@ export default function Transcript({ segments, raw, position, seek, onEdit, issu
     if (seconds > segments.reduce((end, segment) => Math.max(end, segment.end), 0)) { setTimeError('时间超出转录范围'); return; }
     setTimeError(''); seek(seconds);
   }
+  async function assign() {
+    if (!onAssign || !selectedIds.length || !speakers?.[assignee] || !filterSettled || assigning) return;
+    setAssigning(true); setAssignError('');
+    try {
+      await onAssign(selectedIds, assignee);
+      setSelected(new Set());
+    } catch (e) { setAssignError(message(e)); }
+    finally { setAssigning(false); }
+  }
 
   return <>
     <div className="transcript-navigation">
@@ -99,8 +123,20 @@ export default function Transcript({ segments, raw, position, seek, onEdit, issu
         <div className="search-field"><Icon name="search" size={17} /><input type="search" autoComplete="off" aria-label="搜索全文" placeholder="搜索全文…" value={query} onChange={e => { setQuery(e.target.value); setFollow(false); }} onKeyDown={e => { if (e.key === 'Enter') nextMatch(e.shiftKey ? -1 : 1); }} />
           {query && <button type="button" className="icon-button" aria-label="清除搜索" onClick={() => setQuery('')}><Icon name="close" size={14} /></button>}
         </div>
-        {Object.keys(speakers).length > 0 && <label className="speaker-filter"><span className="visually-hidden">说话人</span><select aria-label="按说话人筛选" value={person} onChange={e => { setPerson(e.target.value); setFollow(false); }}><option value="all">全部说话人</option>{Object.entries(speakers).map(([id, p]) => <option key={id} value={id}>{id} {p.name}{p.scope === 'chunk' ? '（分块内）' : ''}</option>)}<option value="unknown">待确认</option></select></label>}
+        {(people.length > 0 || segments.some(s => s.speaker_resolution)) && <label className="speaker-filter"><span className="visually-hidden">说话人</span><select aria-label="按说话人筛选" value={person} onChange={e => { setPerson(e.target.value); setFollow(false); }}><option value="all">全部说话人</option>{people.map(([id, p]) => <option key={id} value={id}>{id} {p.name}{p.scope === 'chunk' ? '（分块内）' : ''}</option>)}<option value="unknown">待确认</option></select></label>}
       </div>
+      {canAssign && rows.length > 0 && <form className="speaker-batch" onSubmit={e => { e.preventDefault(); void assign(); }}>
+        <button type="button" className="button ghost small" disabled={assigning || !filterSettled} onClick={() => setSelected(selectedIds.length === rows.length ? new Set() : new Set(rows.map(({ segment }) => segment.id)))}>
+          {selectedIds.length === rows.length ? '取消全选' : `全选当前 ${rows.length} 段`}
+        </button>
+        <select aria-label="批量指派给" value={assignee} disabled={assigning} onChange={e => setAssignee(e.target.value)}>
+          <option value="">指派给…</option>{people.map(([id, p]) => <option key={id} value={id}>{id} {p.name}</option>)}
+        </select>
+        <button type="submit" className="button secondary small" disabled={assigning || !filterSettled || !selectedIds.length || !speakers?.[assignee]}>
+          {assigning ? '正在指派…' : `指派 ${selectedIds.length} 段`}
+        </button>
+      </form>}
+      {canAssign && assignError && <p className="inline-error" role="alert">{assignError}</p>}
       <div className="transcript-playback">
         <button type="button" className={`button ghost small follow-button ${follow ? 'following' : ''}`} aria-pressed={follow} onClick={() => setFollow(!follow)}><Icon name="locate" size={15} />{follow ? '正在跟随' : '跟随播放'}</button>
         {deferredQuery && <div className="search-count"><span role="status">{rows.length ? `${Math.min(match + 1, rows.length)} / ${rows.length} 段` : '没有匹配'}</span><button type="button" className="icon-button" disabled={!rows.length} aria-label="上一匹配" onClick={() => nextMatch(-1)}><span className="previous-match"><Icon name="arrow" size={14} /></span></button><button type="button" className="icon-button" disabled={!rows.length} aria-label="下一匹配" onClick={() => nextMatch(1)}><span className="next-match"><Icon name="arrow" size={14} /></span></button></div>}
@@ -115,14 +151,22 @@ export default function Transcript({ segments, raw, position, seek, onEdit, issu
           const { segment, index } = rows[row.index];
           const near = issues.some(issue => typeof issue !== 'string' && (issue.start !== undefined ? issue.start <= segment.end && (issue.end ?? issue.start) >= segment.start : issue.chunk_index === segment.index));
           const speakerId = personId(segment);
-          const speaker = speakerId ? speakers[speakerId] : undefined;
-          const uncertain = !speakerId || ((raw || segment.speaker_assignment !== 'user') && (speaker?.scope !== 'global' || ['new_candidate', 'unresolved'].includes(segment.speaker_resolution || '')));
-          const text = raw ? segment.raw_text || segment.text : segment.text;
+          const speaker = speakerId ? speakers?.[speakerId] : undefined;
+          const uncertain = pendingSpeaker(segment, speakers || {}, raw);
+          const text = raw ? segment.raw_text ?? segment.text : segment.text;
           const at = deferredQuery ? text.toLocaleLowerCase().indexOf(deferredQuery) : -1;
           return <div key={row.key} data-index={row.index} ref={list.measureElement} className="virtual-row" style={{ transform: `translateY(${row.start}px)` }}>
             <div className={`transcript-segment ${position >= segment.start && position < segment.end ? 'playing' : ''} ${near ? 'needs-review' : ''}`}>
               <button type="button" className="segment-time" onClick={() => seek(segment.start)} aria-label={`回听 ${clock(segment.start)} 的片段`}><span className="segment-number">{String(index + 1).padStart(2, '0')}</span>{clock(segment.start)}<Icon name="play" size={12} /></button>
-              <div className="segment-body">{(Object.keys(speakers).length > 0 || segment.speaker_resolution) && <div className="speaker-label" style={{ color: speakerColor(speakerId) }}>{speakerId && <span className="speaker-dot" style={{ background: speakerColor(speakerId) }} />}{speaker ? `${speakerId} ${speaker.name}` : '说话人待确认'}{speaker && uncertain && <small> · 归属待确认{speaker.scope === 'chunk' ? '（分块内）' : ''}</small>}</div>}<button type="button" className="segment-text" onClick={() => seek(segment.start)}>{at < 0 ? text : <>{text.slice(0, at)}<mark>{text.slice(at, at + deferredQuery.length)}</mark>{text.slice(at + deferredQuery.length)}</>}{near && <span className="review-label" title="此处有待复核问题">待回听</span>}</button></div>
+              <div className="segment-body">{(people.length > 0 || segment.speaker_resolution) && <div className="speaker-label" style={{ color: speakerColor(speakerId) }}>{speakerId && <span className="speaker-dot" style={{ background: speakerColor(speakerId) }} />}{speaker ? `${speakerId} ${speaker.name}` : '说话人待确认'}{speaker && uncertain && <small> · 归属待确认{speaker.scope === 'chunk' ? '（分块内）' : ''}</small>}</div>}<button type="button" className="segment-text" onClick={() => seek(segment.start)}>{at < 0 ? text : <>{text.slice(0, at)}<mark>{text.slice(at, at + deferredQuery.length)}</mark>{text.slice(at + deferredQuery.length)}</>}{near && <span className="review-label" title="此处有待复核问题">待回听</span>}</button></div>
+              {canAssign && <input type="checkbox" className="segment-select" aria-label={`选择第 ${index + 1} 段`} disabled={assigning || !filterSettled} checked={selected.has(segment.id)} onChange={e => {
+                const checked = e.target.checked;
+                setSelected(previous => {
+                  const next = new Set(previous);
+                  if (checked) next.add(segment.id); else next.delete(segment.id);
+                  return next;
+                });
+              }} />}
               {!raw && onEdit && <button type="button" className="icon-button edit-segment" aria-label={`修改第 ${index + 1} 段文字`} onClick={() => onEdit(segment)}><Icon name="edit" size={16} /></button>}
             </div>
           </div>;

@@ -27,7 +27,7 @@ from asr_server.config import Settings
 from asr_server.errors import AsrError
 from asr_server.observability import ExecutionContext, bind_context, current_context, emit, safe_exception
 from asr_server.transcription import TranscriptionRequest, run_transcription_path, validate_transcription_request
-from asr_server.workbench.speakers import ensure_speakers, speaker_view
+from asr_server.workbench.speakers import ensure_speakers, pending_speaker, speaker_view
 from asr_server.workbench.store import WorkbenchStore, after_days, identifier, now
 
 
@@ -1556,6 +1556,27 @@ class WorkbenchService:
         await self.store.run(self.check_capacity, job["owner_id"], len(json.dumps(result, ensure_ascii=False).encode("utf-8")))
         await self.store.run(self.store.save_version, job)
 
+    def mark_pending_alignment(self, job: dict[str, Any], targets: list[dict[str, Any]]) -> None:
+        self.assert_accepting(job["request"]["model"])
+        result = job["result"]
+        for target in targets:
+            target["timestamps"] = []
+            target["alignment_status"] = "pending"
+        result["timestamps"] = []
+        result["alignment_status"] = "pending"
+        result.pop("pending_segment_id", None)
+        result["pending_segment_ids"] = [target["id"] for target in targets]
+        result.pop("alignment_error", None)
+
+    async def save_text_edit(self, job: dict[str, Any], changes: list[dict[str, Any]], align: bool) -> None:
+        await self.save_edit(job, changes)
+        if align:
+            try:
+                await self.enqueue_alignment(job["id"])
+            except AsrError as exc:
+                if exc.code != "job_queue_full":
+                    raise
+
     async def edit(self, owner: str, job_id: str, segment_id: str, text: str | None, base_version: int,
                    *, speaker_id: str | None = None, assign_speaker: bool = False) -> dict[str, Any]:
         async with self.lock:
@@ -1587,20 +1608,85 @@ class WorkbenchService:
                 result["text"] = "\n\n".join(s["text"] for s in result["segments"] if s["text"])
                 align = definition.capabilities.forced_alignment
                 if align:
-                    self.assert_accepting(job["request"]["model"])
-                    target["timestamps"] = []
-                    target["alignment_status"] = "pending"
-                    result["timestamps"] = []
-                    result["alignment_status"] = "pending"
-                    result["pending_segment_id"] = segment_id
+                    self.mark_pending_alignment(job, [target])
             if changes:
-                await self.save_edit(job, changes)
-                if align:
-                    try:
-                        await self.enqueue_alignment(job_id)
-                    except AsrError as exc:
-                        if exc.code != "job_queue_full":
-                            raise
+                await self.save_text_edit(job, changes, align)
+            return self.public_job(job)
+
+    async def assign_pending(self, owner: str, job_id: str, segment_ids: list[str], speaker_id: str,
+                             base_version: int) -> dict[str, Any]:
+        async with self.lock:
+            job = await self.editable_job(owner, job_id, base_version)
+            if not self.app.state.manager.runtime_for(job["request"]["model"]).definition.capabilities.diarization:
+                raise AsrError(422, "capability_not_supported", "model does not support speakers")
+            result = job["result"]
+            speakers = result["speakers"]
+            if speaker_id not in speakers:
+                raise AsrError(404, "speaker_not_found", "speaker not found")
+            ids = set(segment_ids)
+            targets = [s for s in result["segments"] if s["id"] in ids]
+            if len(targets) != len(ids):
+                raise AsrError(404, "segment_not_found", "segment not found")
+            if any(not pending_speaker(s, speakers) for s in targets):
+                raise AsrError(409, "speaker_already_assigned", "select only segments whose speaker is pending")
+            for target in targets:
+                target["speaker_id"] = speaker_id
+                target["speaker_assignment"] = "user"
+            await self.save_edit(job, [{"method": "speaker_assignment_batch", "segment_ids": [s["id"] for s in targets],
+                                        "before": f"{len(targets)} 段说话人待确认",
+                                        "after": speakers[speaker_id]["name"], "speaker_id": speaker_id}])
+            return self.public_job(job)
+
+    async def replace_text(self, owner: str, job_id: str, find: str, replacement: str,
+                           base_version: int) -> dict[str, Any]:
+        async with self.lock:
+            job = await self.editable_job(owner, job_id, base_version)
+            if not find.strip() or find == replacement:
+                raise AsrError(400, "bad_request", "provide nonempty search text and a different replacement")
+            result = job["result"]
+            segments = result["segments"]
+            original_text = result["text"]
+            original_segments = "".join(s["text"] for s in segments)
+            targets: list[dict[str, Any]] = []
+            occurrences = 0
+            for entry in segments or [result]:
+                original = entry["text"]
+                count = original.count(find)
+                if not count:
+                    continue
+                if len(original) + count * (len(replacement) - len(find)) > max(20000, len(original)):
+                    raise AsrError(400, "replacement_too_long", "replacement would make a text block too long")
+                occurrences += count
+                entry.setdefault("raw_text", original)
+                entry["text"] = original.replace(find, replacement)
+                if segments:
+                    entry["text_edited"] = True
+                    targets.append(entry)
+            if not occurrences:
+                return self.public_job(job)
+
+            capabilities = self.app.state.manager.runtime_for(job["request"]["model"]).definition.capabilities
+            if segments:
+                result.setdefault("raw_text", original_text)
+                canonical_matches = original_text.count(find)
+                if "".join(original_segments.split()) == "".join(original_text.split()):
+                    edited_segments = "\n\n".join(s["text"] for s in segments if s["text"])
+                    candidate = original_text.replace(find, replacement) if canonical_matches == occurrences else edited_segments
+                    result["text"] = candidate if "".join(candidate.split()) == "".join(edited_segments.split()) else edited_segments
+                else:
+                    # Some older results include text outside the timed segments.
+                    extra_growth = (canonical_matches - occurrences) * (len(replacement) - len(find))
+                    if canonical_matches > occurrences and extra_growth > 20000:
+                        raise AsrError(400, "replacement_too_long", "replacement would make the transcript too long")
+                    result["text"] = original_text.replace(find, replacement)
+            elif result.get("timestamps") or result["alignment_status"] == "aligned":
+                result["timestamps"] = []
+                result["alignment_status"] = "unavailable"
+            align = bool(targets and capabilities.forced_alignment)
+            if align:
+                self.mark_pending_alignment(job, targets)
+            await self.save_text_edit(job, [{"method": "text_replace", "before": find, "after": replacement,
+                                            "occurrences": occurrences, "segment_count": len(targets)}], align)
             return self.public_job(job)
 
     async def edit_speaker(self, owner: str, job_id: str, name: str, base_version: int,
@@ -1647,18 +1733,25 @@ class WorkbenchService:
         try:
             job = (await self.store.run(self.store.job, job_id))
             result = job["result"]
-            segment_id = result.get("pending_segment_id")
-            if result["alignment_status"] != "pending" or not segment_id:
+            segment_ids = set(result.get("pending_segment_ids") or [result.get("pending_segment_id")]) - {None}
+            if result["alignment_status"] != "pending" or not segment_ids:
                 return
             self.check_running(job_id)
             self.attempts[job_id] = await self.store.run(self.store.begin_attempt, job_id, kind="alignment")
-            target = next(s for s in result["segments"] if s["id"] == segment_id)
             asset = await self.prepare_audio(job_id)
-            audio = AudioPath(asset.path, target["start"], target["end"])
-            items = await self.app.state.manager.align_text(
-                audio, text=target["text"], model_id=job["request"]["model"],
-                backend="auto", language=job["request"]["language"], timestamps="auto",
-            ) if target["text"] else []
+            for target in result["segments"]:
+                if target["id"] not in segment_ids:
+                    continue
+                self.check_running(job_id)
+                audio = AudioPath(asset.path, target["start"], target["end"])
+                items = await self.app.state.manager.align_text(
+                    audio, text=target["text"], model_id=job["request"]["model"],
+                    backend="auto", language=job["request"]["language"], timestamps="auto",
+                ) if target["text"].strip() else []
+                target["timestamps"] = [{**item.to_api(), "start": item.start + target["start"],
+                                         "end": item.end + target["start"]} for item in items]
+                target["alignment_status"] = "aligned"
+                target.pop("reading_segmentation", None)
             await self.cleanup_operation(job_id)
             async with self.lock:
                 latest = (await self.store.run(self.store.job, job_id))
@@ -1668,15 +1761,13 @@ class WorkbenchService:
                     return
                 job = latest
                 job["result"] = result
-                target["timestamps"] = [{**item.to_api(), "start": item.start + target["start"], "end": item.end + target["start"]} for item in items]
-                target["alignment_status"] = "aligned"
-                target.pop("reading_segmentation", None)
                 result["timestamps"] = [item for s in result["segments"] for item in s.get("timestamps", [])]
                 result["alignment_status"] = "aligned" if all(
-                    not s["text"] or (s.get("timestamps") and s.get("reading_segmentation") != "unmapped_alignment")
+                    not s["text"].strip() or (s.get("timestamps") and s.get("reading_segmentation") != "unmapped_alignment")
                     for s in result["segments"]
                 ) else "incomplete"
                 result.pop("pending_segment_id", None)
+                result.pop("pending_segment_ids", None)
                 result["versions"][-1]["alignment_status"] = result["alignment_status"]
                 await self.store.run(self.store.save_version, job, **self.attempt_arguments(job_id))
         except asyncio.CancelledError:

@@ -222,6 +222,10 @@ textarea { resize: vertical; line-height: 1.7; }
 .transcript-navigation { display: flex; flex-direction: column; gap: var(--space-2xs); padding: var(--space-xs) var(--space-sm); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .transcript-filters, .transcript-playback { display: flex; align-items: center; gap: var(--space-xs); min-width: 0; }
 .transcript-playback { flex-wrap: wrap; }
+.speaker-batch, .replace-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
+.speaker-batch select { flex: 1 1 100px; width: auto; min-width: 0; }
+input.segment-select { flex: 0 0 auto; width: 18px; min-height: 0; height: 18px; margin: var(--space-xs) 0; accent-color: var(--action); }
+.replace-actions { justify-content: space-between; margin-top: var(--space-sm); }
 .speaker-filter { flex: 0 1 180px; min-width: 100px; }
 .speaker-filter select { min-width: 0; width: 100%; padding-inline: var(--space-xs); }
 .transcript-playback .time-jump { margin-left: auto; }

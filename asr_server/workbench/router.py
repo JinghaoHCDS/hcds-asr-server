@@ -57,6 +57,18 @@ class EditSpeaker(BaseModel):
     base_version: int = Field(ge=1)
 
 
+class AssignPendingSpeakers(BaseModel):
+    segment_ids: list[str] = Field(min_length=1)
+    speaker_id: str = Field(min_length=1, max_length=80)
+    base_version: int = Field(ge=1)
+
+
+class ReplaceText(BaseModel):
+    find: str = Field(min_length=1, max_length=20000)
+    replacement: str = Field(max_length=20000)
+    base_version: int = Field(ge=1)
+
+
 class NewUser(Login):
     is_admin: bool = False
 
@@ -259,6 +271,14 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
             raise AsrError(400, "bad_request", "provide text or speaker_id")
         return await service.edit(user["id"], job_id, segment_id, data.text, data.base_version,
                                   speaker_id=data.speaker_id, assign_speaker="speaker_id" in data.model_fields_set)
+
+    @router.post("/jobs/{job_id}/speakers/assign-pending")
+    async def assign_pending(job_id: str, data: AssignPendingSpeakers, user: User) -> dict[str, Any]:
+        return await service.assign_pending(user["id"], job_id, data.segment_ids, data.speaker_id, data.base_version)
+
+    @router.post("/jobs/{job_id}/replace-text")
+    async def replace_text(job_id: str, data: ReplaceText, user: User) -> dict[str, Any]:
+        return await service.replace_text(user["id"], job_id, data.find, data.replacement, data.base_version)
 
     @router.post("/jobs/{job_id}/speakers")
     async def create_speaker(job_id: str, data: EditSpeaker, user: User) -> dict[str, Any]:

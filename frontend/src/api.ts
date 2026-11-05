@@ -53,6 +53,12 @@ export interface Capabilities {
 }
 export interface Issue { code?: string; kind?: string; type?: string; message?: string; start?: number; end?: number; chunk_index?: number }
 export interface Segment { id: string; index: number; start: number; end: number; text: string; raw_text?: string; timestamps?: unknown[]; speaker_id?: string | null; model_speaker_id?: string | null; speaker_assignment?: string; speaker_resolution?: string; speaker_scope?: string; text_edited?: boolean }
+export function pendingSpeaker(segment: Segment, speakers: Record<string, Speaker>, raw = false) {
+  const id = raw ? segment.model_speaker_id : segment.speaker_id;
+  if (!id) return true;
+  if (!raw && segment.speaker_assignment === 'user') return false;
+  return speakers[id]?.scope !== 'global' || ['new_candidate', 'unresolved'].includes(segment.speaker_resolution || '');
+}
 export interface Completeness { complete?: boolean | null; resolved_chunks?: number; total_chunks?: number; gap_count?: number; attempted_chunks?: number }
 export interface Gap { chunk_index: number; start: number; end: number; reason: string; alignment_status?: string; stop_reason?: string }
 export type Retryability = { retryable: boolean; reason?: string } | 'retry' | 'exhausted' | 'from_start_required';
@@ -111,6 +117,8 @@ export const errorNames: Record<string, string> = {
   audio_not_ready: '回听音频还在准备中，请稍后再试。', result_not_ready: '转录结果尚未生成。',
   alignment_pending: '字幕正在更新，请稍后再导出。', alignment_incomplete: '字幕尚未完成对齐，可先导出文字。',
   version_conflict: '内容已在其他页面更新，请刷新后再修改。', storage_quota_exceeded: '存储空间不足，请删除不再需要的任务后重试。',
+  speaker_already_assigned: '选中的片段里有归属已确认的片段，请刷新后重新选择。',
+  replacement_too_long: '替换后的文本太长，请缩短替换内容。',
   storage_unavailable: '服务器可用磁盘空间不足，请联系管理员。', audio_too_large: '文件超过服务允许的上传大小。',
   duration_limit_exceeded: '音频时长超过服务限制。', audio_decode_failed: '无法读取素材的音轨，请检查文件是否完整。',
   source_unavailable: '任务音频已不可用，无法重新处理此任务。', resume_version_unavailable: '原流程版本不可用，请从头重试或重新提交素材。',

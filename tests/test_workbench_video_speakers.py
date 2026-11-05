@@ -80,6 +80,52 @@ async def test_moss_edit_versions_names_and_owner_isolation(tmp_path: Path, monk
         assert (await client.get(f'/api/jobs/{key}/video')).status_code == 404
 
 
+async def test_batch_speaker_and_literal_replacement_preserve_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def unresolved(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {'text': '甲.甲.\n甲.\n乙', 'duration': 1.5, 'segments': [
+            {'start': 0, 'end': .4, 'speaker': 'S1', 'speaker_scope': 'global', 'text': '甲.甲.'},
+            {'start': .5, 'end': .9, 'speaker': None, 'speaker_resolution': 'unresolved', 'text': '甲.'},
+            {'start': 1., 'end': 1.4, 'speaker': 'S2', 'speaker_scope': 'chunk', 'text': '乙'}]}
+    monkeypatch.setattr('asr_server.workbench.service.run_transcription_path', unresolved)
+    app = create_app(Settings(adapter='mock', workbench_data_dir=tmp_path / 'data', enable_moss=True, min_free_disk_mb=0))
+    service = app.state.workbench
+    for username in ('alice', 'bob'):
+        service.store.create_user(username, 'synthetic-password')
+    async with app.router.lifespan_context(app), AsyncClient(transport=ASGITransport(app), base_url='http://testserver') as client:
+        await client.post('/api/auth/login', json={'username': 'alice', 'password': 'synthetic-password'})
+        key = await upload(client, make_wav(1.5))
+        await wait(service, key)
+        url = f'/api/jobs/{key}'
+        selected = {'segment_ids': ['segment-1', 'segment-2'], 'speaker_id': 'P1', 'base_version': 1}
+        mixed = {**selected, 'segment_ids': ['segment-0', 'segment-1']}
+        assert (await client.post(f'{url}/speakers/assign-pending', json=mixed)).status_code == 409
+        assert (await client.get(url)).json()['result']['version'] == 1
+        response = await client.post(f'{url}/speakers/assign-pending', json=selected)
+        assert response.status_code == 200, response.text
+        result = response.json()['result']
+        assert result['version'] == 2
+        assert [s['speaker_id'] for s in result['segments']] == ['P1', 'P1', 'P1']
+        assert [s['model_speaker_id'] for s in result['segments']] == ['P1', None, 'P2']
+        assert (await client.post(f'{url}/speakers/assign-pending', json=selected)).status_code == 409
+
+        replacement = {'find': '甲.', 'replacement': '甲$', 'base_version': 2}
+        response = await client.post(f'{url}/replace-text', json=replacement)
+        assert response.status_code == 200, response.text
+        result = response.json()['result']
+        assert result['version'] == 3 and result['alignment_status'] == 'segment_timed'
+        assert result['text'] == '甲$甲$\n甲$\n乙'
+        assert result['raw_text'] == '甲.甲.\n甲.\n乙'
+        assert result['changes'][-1]['occurrences'] == 3
+        assert [s['raw_text'] for s in result['segments']] == ['甲.甲.', '甲.', '乙']
+        assert (await client.get(f'{url}/export?format=txt&version=1')).text == '甲.甲.\n甲.\n乙\n'
+        assert (await client.get(f'{url}/export?format=srt&version=3')).status_code == 200
+        no_match = await client.post(f'{url}/replace-text', json={**replacement, 'base_version': 3})
+        assert no_match.json()['result']['version'] == 3
+        await client.post('/api/auth/login', json={'username': 'bob', 'password': 'synthetic-password'})
+        assert (await client.post(f'{url}/replace-text', json={**replacement, 'base_version': 3})).status_code == 404
+        assert (await client.post(f'{url}/speakers/assign-pending', json={**selected, 'base_version': 3})).status_code == 404
+
+
 async def test_video_failure_retry_playback_and_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from asr_server.workbench import service as module
     original = getattr(module, "prepare_video")

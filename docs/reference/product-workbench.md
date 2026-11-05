@@ -145,6 +145,8 @@ uv run python -m scripts.workbench_release bundle --output artifacts/releases/ne
 - 上传完成增加 `speaker_resolution=off|auto|required`、可选 `expected_speakers=1..4`。MOSS 默认 auto，冻结 `max_new_tokens=65536`；其他模型默认 off。人数只用于提示，不强行合并人物。旧 `/v1` 默认参数不变。
 - 结果版本内 `speakers` 为稳定 P 编号到名称及来源的映射。片段 `speaker_id` 为有效归属，`model_speaker_id` 保留首次模型映射；旧 speaker/source_speaker/speaker_scope 字段保持。局部编号依块分开，候选与未确定状态保持可见。
 - `PATCH .../segments/{segment_id}` 接受 text 和/或 speaker_id（null 表示待确认）以及 base_version。`POST .../speakers` 创建人物，`PATCH .../speakers/{speaker_id}` 改名，均接受 name、base_version。只能修改已完成且无待完成对齐的版本；冲突 409，修改原子生成新版本。
+- 回看页筛选「待确认」后可勾选片段（或全选当前筛选结果）并指派给现有说话人。`POST .../speakers/assign-pending` 接受 segment_ids、speaker_id、base_version。只修改仍待确认的选中片段，保留原始模型归属。
+- 工具中的「查找与替换」显示交付稿的命中次数，按原字面区分大小写逐段替换，无分段时直接替换全文。留空替换值可删除命中内容。`POST .../replace-text` 接受 find、replacement、base_version；一次操作保存一个版本和一项修改记录，保留模型原稿、历史版本和公共词库。
 - 改人物不调用 GPU。MOSS 改字沿用段级时间并标记 text_edited，不声明逐字对齐；Qwen 改字仍重新对齐。改名不改片段身份，历史版本保留历史名字。
 - `export?format=md&version=N` 导出 UTF-8 对话稿：文件名、版本、完整性、人物表、时间与发言。相邻同人间隔最多 2 秒、合并后最多 60 秒/800 字符；不跨重叠、缺口或待确认归属合并，不生成摘要。完整 JSON 保留人物与修改来源；其他格式兼容。
 

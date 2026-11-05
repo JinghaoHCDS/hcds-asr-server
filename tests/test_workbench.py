@@ -237,6 +237,51 @@ async def test_edit_blocks_stale_subtitle_and_cas(workbench: tuple[FastAPI, Work
     assert (await client.get(f"/api/jobs/{job_id}/export?format=srt&version=2")).status_code == 200
 
 
+async def test_batch_text_realigns_only_affected_segments(workbench: tuple[FastAPI, WorkbenchService, AsyncClient], monkeypatch: pytest.MonkeyPatch) -> None:
+    app, service, client = workbench
+    await login(client)
+    job_id = await submit(client)
+    await completed(client, job_id)
+    job = service.store.job(job_id)
+    result = job["result"]
+    result["text"] = result["raw_text"] = "甲乙甲"
+    result["segments"] = [
+        {"id": f"segment-{i}", "text": text, "raw_text": text, "start": i / 2, "end": (i + 1) / 2,
+         "timestamps": [{"text": text, "start": i / 2, "end": (i + 1) / 2}]}
+        for i, text in enumerate("甲乙甲")
+    ]
+    service.store.save_version(job)
+    gate = asyncio.Event()
+    calls = []
+
+    async def align(*args: Any, **kwargs: Any) -> list[Any]:
+        from asr_server.adapters.base import TimestampItem
+        await gate.wait()
+        calls.append(kwargs["text"])
+        return [TimestampItem(text=kwargs["text"], start=0., end=.4, granularity="word")]
+    monkeypatch.setattr(app.state.manager, "align_text", align)
+    url = f"/api/jobs/{job_id}"
+    response = await client.post(f"{url}/replace-text", json={"find": "甲", "replacement": "丙", "base_version": 1})
+    try:
+        assert response.status_code == 200, response.text
+        pending = response.json()["result"]
+        assert pending["version"] == 2 and pending["alignment_status"] == "pending"
+        assert [len(s["timestamps"]) for s in pending["segments"]] == [0, 1, 0]
+        assert (await client.get(f"{url}/export?format=srt")).status_code == 409
+        assert (await client.get(f"{url}/export?format=srt&version=1")).status_code == 200
+    finally:
+        gate.set()
+    for _ in range(100):
+        job = (await client.get(url)).json()
+        if job["result"]["alignment_status"] != "pending":
+            break
+        await asyncio.sleep(0.01)
+    assert job["result"]["alignment_status"] == "aligned"
+    assert calls == ["丙", "丙"]
+    assert [item["start"] for item in job["result"]["timestamps"]] == [0., .5, 1.]
+    assert (await client.get(f"{url}/export?format=srt")).status_code == 200
+
+
 async def test_quota_reservation_release_and_expiry(workbench: tuple[FastAPI, WorkbenchService, AsyncClient]) -> None:
     _app, service, client = workbench
     service.settings = replace(service.settings, workbench_user_quota_bytes=10)
