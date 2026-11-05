@@ -19,6 +19,34 @@ def task(store: WorkbenchStore, name: str = 'task') -> dict[str, Any]:
     return job
 
 
+def test_schema6_refreshes_old_list_projection_without_changing_data(tmp_path: Path) -> None:
+    store = WorkbenchStore(tmp_path)
+    job = task(store)
+    job['video_asset'] = {'state': 'preparing', 'encoder': 'h264_nvenc', 'progress': {'phase': 'encoding_video', 'percent': 25}}
+    store.save_job(job)
+    with store.connection() as db:
+        for name, operation in [('jobs_summary_insert', 'INSERT'), ('jobs_summary_update', 'UPDATE OF payload,status')]:
+            db.execute(f'DROP TRIGGER {name}')
+            db.execute(f"CREATE TRIGGER {name} AFTER {operation} ON jobs BEGIN UPDATE jobs SET summary='{{}}' WHERE id=new.id; END")
+        db.execute("UPDATE jobs SET summary='{}'")
+        payload = db.execute('SELECT payload FROM jobs').fetchone()[0]
+        capacity = [tuple(row) for row in db.execute('SELECT * FROM capacity')]
+    store.close()
+    reopened = WorkbenchStore(tmp_path)
+    summary = reopened.job_summaries('alice')['jobs'][0]
+    assert summary['video_asset']['encoder'] == 'h264_nvenc'
+    assert summary['video_asset']['progress']['percent'] == 25
+    with reopened.connection() as db:
+        assert db.execute('SELECT payload FROM jobs').fetchone()[0] == payload
+        assert [tuple(row) for row in db.execute('SELECT * FROM capacity')] == capacity
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 6
+    updated = reopened.job('task')
+    updated['video_asset']['progress']['percent'] = 50
+    reopened.save_job(updated)
+    assert reopened.job_summaries('alice')['jobs'][0]['video_asset']['progress']['percent'] == 50
+    reopened.close()
+
+
 def test_schema4_upgrade_preserves_tasks_versions_chunks_accounts_and_expiry(tmp_path: Path) -> None:
     store = WorkbenchStore(tmp_path)
     user = store.create_user('owner', 'test-password')
@@ -35,7 +63,7 @@ def test_schema4_upgrade_preserves_tasks_versions_chunks_accounts_and_expiry(tmp
     reopened = WorkbenchStore(tmp_path)
     reopened.initialize()
     with reopened.connection() as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION == 5
+        assert db.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION == 6
         assert db.execute("SELECT payload FROM jobs WHERE id='task'").fetchone()[0] == old_payload
         assert all([tuple(row) for row in db.execute(f'SELECT * FROM {table}')] == rows for table, rows in before.items())
     assert reopened.job('task')['expires_at'] == '2030-01-01T00:00:00+00:00'

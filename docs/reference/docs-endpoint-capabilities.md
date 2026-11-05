@@ -50,13 +50,16 @@ after terminal state. Default workbench upload size is 8 GiB; `/v1` remains
 512 MiB. A Bearer token does not grant access to personal workbench tasks.
 The OpenAPI paths below include the enabled workbench API too.
 
-The current workbench schema is 5. Migration from schema 4 retains tasks,
+The current workbench schema is 6. Migration from schema 4/5 retains tasks,
 MP3s, versions, checkpoints and retention deadlines; it must not use the older
 workbench reset workflow. Bounded recovery preserves partial results and gaps,
 with incomplete TXT/JSON clearly marked and subtitles withheld until complete
 real timing exists. `/health` remains liveness; `/readyz` describes inference
 admission. Maintenance, worker isolation and administrator drain still allow
-existing text, audio playback, exports, login and cancellation.
+existing text, audio/video playback, exports, login and cancellation.
+Video uploads retain H.264/AAC MP4 alongside the canonical MP3. Speaker names,
+segment assignments and corrections are versioned; Markdown dialogue exports
+retain unresolved attribution and coverage gaps.
 
 
 ## MCP usage

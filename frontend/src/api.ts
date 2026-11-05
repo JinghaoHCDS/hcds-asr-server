@@ -22,13 +22,22 @@ export interface AudioAsset {
   source_stream_index?: number;
   source_audio_streams?: number;
 }
+export interface VideoAsset {
+  state: 'pending' | 'queued' | 'preparing' | 'ready' | 'failed' | 'not_applicable' | 'unavailable';
+  sha256?: string; size_bytes?: number; duration_seconds?: number; width?: number; height?: number;
+  audio_offset_seconds?: number; error_code?: string;
+  encoder?: 'libx264' | 'h264_nvenc';
+  progress?: { phase?: string; percent?: number; processed_seconds?: number; duration_seconds?: number };
+}
+export interface Speaker { name: string; scope: string; source_speaker?: string; chunk_index?: number }
+export const speakerColor = (id: string | null | undefined) => ['#0C91FA', '#9B7624', '#7856A6', '#328079'][Math.max(0, Number(id?.slice(1) || 1) - 1) % 4];
 export interface ModelOption {
   id: string;
   provider: string;
   default: boolean;
   engine_id: string;
   pipelines: string[];
-  capabilities: { forced_alignment: boolean; timestamps: string[]; languages: string[]; segment_timestamps: boolean; diarization: boolean };
+  capabilities: { forced_alignment: boolean; timestamps: string[]; languages: string[]; segment_timestamps: boolean; diarization: boolean; speaker_resolution_modes?: string[]; validated_anchor_replay_speakers?: number };
 }
 export interface Capabilities {
   domains: { id: string; label: string }[];
@@ -43,7 +52,7 @@ export interface Capabilities {
   storage: { used_bytes: number; quota_bytes: number };
 }
 export interface Issue { code?: string; kind?: string; type?: string; message?: string; start?: number; end?: number; chunk_index?: number }
-export interface Segment { id: string; index: number; start: number; end: number; text: string; raw_text?: string; timestamps?: unknown[] }
+export interface Segment { id: string; index: number; start: number; end: number; text: string; raw_text?: string; timestamps?: unknown[]; speaker_id?: string | null; model_speaker_id?: string | null; speaker_assignment?: string; speaker_resolution?: string; speaker_scope?: string; text_edited?: boolean }
 export interface Completeness { complete?: boolean | null; resolved_chunks?: number; total_chunks?: number; gap_count?: number; attempted_chunks?: number }
 export interface Gap { chunk_index: number; start: number; end: number; reason: string; alignment_status?: string; stop_reason?: string }
 export type Retryability = { retryable: boolean; reason?: string } | 'retry' | 'exhausted' | 'from_start_required';
@@ -51,6 +60,9 @@ export interface Result {
   text: string;
   raw_text?: string;
   segments: Segment[];
+  speakers?: Record<string, Speaker>;
+  speaker_count_mismatch?: boolean; expected_speakers?: number;
+  diarization?: {status: string; speaker_scope: string};
   version: number;
   versions?: { version: number; created_at: string; alignment_status: string }[];
   alignment_status: 'aligned' | 'segment_timed' | 'pending' | 'failed' | 'unavailable' | 'incomplete';
@@ -74,6 +86,8 @@ export interface Job {
   alignment_status?: string;
   model?: string;
   audio_asset?: AudioAsset;
+  video_asset?: VideoAsset;
+  expected_speakers?: number;
   audio_size_bytes?: number;
   progress?: { phase?: string; percent?: number; completed_chunks?: number; resolved_chunks?: number; attempted_chunks?: number; total_chunks?: number; current_chunk?: number; text?: string; gap_count?: number; next_attempt_at?: string; start?: number; end?: number };
   completeness?: Completeness;
@@ -143,6 +157,11 @@ export async function jobDetail(jobId: string, etag?: string): Promise<{ job?: J
 
 export function message(error: unknown): string { return error instanceof Error ? error.message : '操作失败，请重试'; }
 export const terminal = (status: string) => ['completed', 'failed', 'cancelled', 'expired'].includes(status);
+export const videoPending = (job: Job) => ['queued', 'preparing'].includes(job.video_asset?.state || '');
+export const showingVideoProgress = (job: Job) => videoPending(job) && terminal(job.status);
+export const jobProgress = (job: Job): NonNullable<Job['progress']> => showingVideoProgress(job)
+  ? job.video_asset?.progress || { phase: job.video_asset?.state === 'queued' ? 'queued_video' : 'preparing_video' }
+  : job.progress || {};
 export const retryFromStart = (job: Job) => ['from_start', 'retry_from_start'].includes(job.next_action || job.result?.next_action || '') || (job.retryability || job.result?.retryability) === 'from_start_required';
 export const canRetry = (job: Job) => {
   const policy = job.retryability || job.result?.retryability;
@@ -150,6 +169,14 @@ export const canRetry = (job: Job) => {
 };
 export const retryLabel = (job: Job) => retryFromStart(job) ? '从头处理' : ['retry_alignment', 'resume_alignment'].includes(job.next_action || job.result?.next_action || '') ? '恢复字幕对齐' : '恢复未完成区间';
 export const completeness = (job: Job): Completeness => job.completeness?.total_chunks ? job.completeness : job.result?.completeness || {};
+export const videoProgressText = (job: Job) => {
+    const progress = job.video_asset?.progress;
+    const amount = progress?.percent != null ? `${Math.floor(progress.percent)}%` : '';
+    const time = progress?.processed_seconds != null && progress.duration_seconds != null ? `${clock(progress.processed_seconds)} / ${clock(progress.duration_seconds)}` : '';
+    const encoder = progress?.phase === 'encoding_video' ? job.video_asset?.encoder === 'h264_nvenc' ? 'GPU' : job.video_asset?.encoder === 'libx264' ? 'CPU' : '' : '';
+    return [amount, time, encoder].filter(Boolean).join(' · ');
+};
+export const jobProgressText = (job: Job) => showingVideoProgress(job) ? videoProgressText(job) : progressText(job);
 export const progressText = (job: Job) => {
   const done = completeness(job); const processing = !terminal(job.status) && !!job.progress?.total_chunks;
   const total = processing ? job.progress?.total_chunks : done.total_chunks || job.progress?.total_chunks;
@@ -159,11 +186,14 @@ export const progressText = (job: Job) => {
   if (gaps > 0) return total ? `${attempted !== undefined ? `已处理 ${attempted} / ${total} 段` : `共 ${total} 段`}，${gaps} 处待确认` : `${gaps} 处待确认`;
   return total ? `已解决 ${resolved} / ${total} 段` : '';
 };
-export const jobStatusLabel = (job: Job) => job.error?.code === 'quality_incomplete' && (completeness(job).gap_count || job.gaps?.length || job.result?.gaps?.length) ? '已处理，部分声音待回听确认' : phaseName(job.status);
+export const jobStatusLabel = (job: Job) => job.error?.code === 'quality_incomplete' && (completeness(job).gap_count || job.gaps?.length || job.result?.gaps?.length) ? '已处理，部分声音待回听确认' : phaseName(job.status === 'preprocessing' ? jobProgress(job).phase || job.status : job.status);
 export const phaseNames: Record<string, string> = {
   cleanup_pending: '正在清理临时音频', retry_wait: '服务正在恢复', paused_for_release: '已保存进度，等待服务更新',
   queued: '排队中', preprocessing: '准备音频', splitting: '分析语音边界', loading_model: '准备模型',
   preparing_playback_audio: '准备回听音频', preparing_recognition_audio: '准备识别音频',
+  waiting_for_video_capacity: '音频已就绪，等待 GPU 空闲',
+  queued_video: '等待处理视频', preparing_video: '准备回看视频', checking_video: '检查原始视频',
+  encoding_video: '压缩视频', finalizing_video: '整理视频文件', verifying_video: '校验回看视频',
   transcribing: '转录中', reviewing: '复核片段', aligning: '对齐字幕', merging: '整理结果',
   completed: '已完成', failed: '处理失败', cancel_requested: '等待取消', cancelled: '已取消',
   expired: '已过期', uploading: '上传中', pending: '字幕更新中', alignment_pending: '字幕更新中',

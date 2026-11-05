@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from asr_server.adapters.base import AudioPath, TranscriptionResult
 from asr_server.audio.preprocess import normalize_audio_path_to_wav_async, probe_audio_duration_path_async
 from asr_server.audio.retained import decoder_identity, prepare_retained_audio, validate_retained_audio
+from asr_server.audio.video import probe_video, prepare_video, validate_video, select_video_encoder
 from asr_server.audio.workspace import ResourceLease
 from asr_server.quality.checkpoints import atomic_json, fingerprint
 from asr_server.audio.assets import NormalizedAudioAsset
@@ -26,6 +27,7 @@ from asr_server.config import Settings
 from asr_server.errors import AsrError
 from asr_server.observability import ExecutionContext, bind_context, current_context, emit, safe_exception
 from asr_server.transcription import TranscriptionRequest, run_transcription_path, validate_transcription_request
+from asr_server.workbench.speakers import ensure_speakers, speaker_view
 from asr_server.workbench.store import WorkbenchStore, after_days, identifier, now
 
 
@@ -52,6 +54,8 @@ class WorkbenchService:
         self.settings = settings
         self.store = WorkbenchStore(Path(settings.workbench_data_dir))
         self.lock = asyncio.Lock()
+        self.video_lock = asyncio.Lock()
+        self.video_queue_lock = asyncio.Lock()
         self.stopping = False
         self.draining = False
         self.storage_ready = True
@@ -68,6 +72,8 @@ class WorkbenchService:
         self.cancel_intents: set[str] = set()
         self.progress: dict[str, dict[str, Any]] = {}
         self.progress_saved: dict[str, float] = {}
+        self.video_tasks: dict[str, asyncio.Task[None]] = {}
+        self.video_encoder: str | None = None
         self.reconciling = False
         self.preparation_errors: dict[str, BaseException] = {}
         self.prepared_assets: dict[str, NormalizedAudioAsset] = {}
@@ -104,7 +110,7 @@ class WorkbenchService:
     def set_draining(self, draining: bool) -> None:
         self.draining = draining
         if draining:
-            for job_id in self.active:
+            for job_id in self.active | self.video_tasks.keys():
                 context = self.contexts.get(job_id)
                 if context is not None:
                     context.cancel_event.set()
@@ -219,6 +225,8 @@ class WorkbenchService:
                 await self.maintenance
             except asyncio.CancelledError:
                 pass
+        if self.video_tasks:
+            await asyncio.gather(*list(self.video_tasks.values()), return_exceptions=True)
 
     def close(self) -> None:
         """Release only after the shared queue/model manager has shut down."""
@@ -256,6 +264,7 @@ class WorkbenchService:
     async def fill_queue(self) -> None:
         if self.stopping or self.draining or not self.storage_ready:
             return
+        await self.fill_video_queue()
         for job_id in await self.store.run(self.store.due_retry_jobs):
             if job_id not in self.active:
                 await self.store.run(self.store.claim_due_retry, job_id)
@@ -286,6 +295,58 @@ class WorkbenchService:
                         raise
                     break
 
+    async def fill_video_queue(self) -> None:
+        if self.stopping or self.draining or self.video_tasks:
+            return
+        async with self.video_queue_lock:
+            if self.video_tasks:
+                return
+            rows = await self.transaction(lambda db: db.execute("SELECT id FROM jobs WHERE json_extract(payload,'$.video_asset.state')='queued' AND coalesce(json_extract(payload,'$.delete_requested'),0)=0 AND coalesce(json_extract(payload,'$.cancel_requested'),0)=0 ORDER BY sequence LIMIT 1").fetchall())
+            if rows:
+                key = str(rows[0]['id'])
+                self.video_tasks[key] = asyncio.create_task(self.run_video_retry(key))
+
+    async def queue_video(self, job_id: str) -> None:
+        async with self.lock:
+            job = await self.store.run(self.store.job_metadata, job_id)
+            if (job.get('video_asset') or {}).get('state') == 'pending':
+                job['video_asset'] = {'state': 'queued'}
+                await self.store.run(self.store.save_job, job)
+        await self.fill_video_queue()
+
+    async def wait_for_video_capacity(self, job_id: str) -> None:
+        """Bound the first model call's contention with this job's video encode.
+
+        Audio preparation remains concurrent. A failed or slow video never
+        becomes a prerequisite for transcription: the grace has a hard limit.
+        """
+        deadline = time.monotonic() + self.settings.video_inference_grace_seconds
+        announced = False
+        while job_id in self.video_tasks and time.monotonic() < deadline:
+            self.check_running(job_id)
+            job = await self.store.run(self.store.job_metadata, job_id)
+            video = job.get('video_asset') or {}
+            if (video.get('state') != 'preparing' or video.get('encoder') != 'h264_nvenc'
+                    or (video.get('progress') or {}).get('phase') != 'encoding_video'):
+                return
+            if not announced:
+                await self.audio_phase(job_id, 'waiting_for_video_capacity')
+                announced = True
+            await asyncio.sleep(min(.25, max(0., deadline-time.monotonic())))
+        self.check_running(job_id)
+
+    async def reserve_video_processing(self, job_id: str, remaining: int) -> None:
+        async with self.lock:
+            current = await self.store.run(self.store.job_metadata, job_id)
+            physical = sum(current.get('retained_file_bytes', {}).values())
+            reserved = await self.transaction(lambda db: int(db.execute('SELECT reserved_bytes FROM jobs WHERE id=?', (job_id,)).fetchone()[0]))
+            audio = max(0, reserved - physical - int(current.get('video_reserved_bytes', 0)))
+            desired = physical + audio + max(0, remaining)
+            await self.store.run(self.check_capacity, current['owner_id'], max(0, desired-reserved))
+            current['video_reserved_bytes'] = max(0, remaining)
+            await self.store.run(self.store.save_job, current, reserved_bytes=desired)
+            await self.sync_disk_reservations()
+
     def check_capacity(self, owner_id: str, additional: int) -> None:
         if self.reconciling:
             raise AsrError(503, "storage_unavailable", "storage reconciliation is in progress; try again shortly")
@@ -301,9 +362,10 @@ class WorkbenchService:
     async def reserve_processing(self, job: dict[str, Any], extra_bytes: int) -> None:
         """Reserve extraction/work copies before releasing the capacity lock."""
         async with self.lock:
+            job = await self.store.run(self.store.job_metadata, job["id"])
             physical = sum(job.get("retained_file_bytes", {}).values())
             reserved = await self.transaction(lambda db: int(db.execute("SELECT reserved_bytes FROM jobs WHERE id=?", (job["id"],)).fetchone()[0]))
-            desired = physical + extra_bytes
+            desired = physical + extra_bytes + int(job.get("video_reserved_bytes", 0))
             additional = max(0, desired - reserved)
             await self.store.run(self.check_capacity, job["owner_id"], additional)
             current = await self.store.run(self.store.job_metadata, job["id"])
@@ -321,7 +383,7 @@ class WorkbenchService:
         async with self.lock:
             current = await self.store.run(self.store.job_metadata, job_id)
             retained = sum(current.get("retained_file_bytes", {}).values())
-            await self.store.run(self.store.save_job, current, reserved_bytes=retained + margin)
+            await self.store.run(self.store.save_job, current, reserved_bytes=retained + margin + int(current.get("video_reserved_bytes", 0)))
             await self.sync_disk_reservations()
 
     def processing_margin(self, request: TranscriptionRequest, duration: float) -> int:
@@ -474,10 +536,14 @@ class WorkbenchService:
         request = TranscriptionRequest(
             model=selected, language=str(parameters.get("language", "auto")), response_format="verbose_json",
             timestamps="auto" if definition.capabilities.forced_alignment else "none",
-            backend="auto", max_new_tokens=None, context="", hotwords=str(parameters.get("hotwords", "")) or None,
+            backend="auto", max_new_tokens=65536 if definition.capabilities.diarization else None, context="", hotwords=str(parameters.get("hotwords", "")) or None,
             split_strategy="auto", max_chunk_seconds=None, overlap_seconds=None, preserve_segments=True,
+            speaker_resolution=str(parameters.get("speaker_resolution") or ("auto" if definition.capabilities.diarization else "off")),
             quality_profile=profile, glossary_snapshot=self.snapshot(str(parameters.get("domain", "general")), str(parameters.get("hotwords", ""))),
         )
+        expected = parameters.get("expected_speakers")
+        if expected is not None and (not definition.capabilities.diarization or isinstance(expected, bool) or not isinstance(expected, int) or not 1 <= expected <= 4):
+            raise AsrError(400, "bad_request", "expected_speakers requires diarization and a count from 1 to 4")
         validate_transcription_request(self.app.state.manager, request)
         return request
 
@@ -504,6 +570,8 @@ class WorkbenchService:
                 requested = {"domain": str(parameters.get("domain", "general")), "hotwords": str(parameters.get("hotwords", "")),
                              "language": str(parameters.get("language", "auto")), "model": parameters.get("model") or original["model"],
                              "quality_profile": parameters.get("quality_profile") or original.get("quality_profile", "legacy")}
+                options.update(speaker_resolution=original.get("speaker_resolution", "off"), expected_speakers=existing.get("expected_speakers"))
+                requested.update(speaker_resolution=parameters.get("speaker_resolution") or original.get("speaker_resolution", "off"), expected_speakers=parameters.get("expected_speakers"))
                 saved_key = await self.transaction(lambda db: db.execute("SELECT idempotency_key FROM jobs WHERE id=?", (existing["id"],)).fetchone()[0])
                 if requested != options or (parameters.get("idempotency_key") or upload_id) != saved_key:
                     raise AsrError(409, "idempotency_conflict", "upload was submitted with different options or idempotency key")
@@ -515,6 +583,15 @@ class WorkbenchService:
             identity = await self.store.run(self.execution_identity, request)
             # Only this upload is locked while reading its complete source.
             digest = await self.store.run(sha256_file, self.upload_path(upload_id))
+            # Classify streams before queueing so pure audio never acquires a
+            # video owner. Video-specific failures are handled independently
+            # after submission and must not prevent audio transcription.
+            video_state = "queued"
+            try:
+                if await probe_video(self.upload_path(upload_id)) is None:
+                    video_state = "not_applicable"
+            except AsrError:
+                pass
             key = parameters.get("idempotency_key") or upload_id
             if not isinstance(key, str) or len(key) > 200:
                 raise AsrError(400, "bad_request", "invalid idempotency key")
@@ -528,7 +605,7 @@ class WorkbenchService:
                 if await self.store.run(self.execution_identity, current_request) != identity or asdict(current_request) != asdict(request):
                     raise AsrError(409, "version_conflict", "model or glossary changed during submission; retry")
                 fingerprint = hashlib.sha256(json.dumps({"source_sha256": digest, "model_identity": identity,
-                    "request": asdict(request)}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                    "request": asdict(request), "expected_speakers": parameters.get("expected_speakers")}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
                 existing = await self.transaction(lambda db: db.execute("SELECT id,fingerprint FROM jobs WHERE owner_id=? AND idempotency_key=?", (owner, key)).fetchone())
                 if existing:
                     if existing["fingerprint"] != fingerprint:
@@ -552,7 +629,8 @@ class WorkbenchService:
                     "request": asdict(request), "model_revision": definition.revision, "model_identity": identity,
                     "source_sha256": digest, "delete_requested": False, "cancel_requested": False,
                     "execution_context": context.to_wire(), "retained_file_bytes": {"source": upload["size_bytes"]},
-                    "audio_asset": {"state": "preparing"},
+                    "audio_asset": {"state": "preparing"}, "video_asset": {"state": video_state},
+                    "expected_speakers": parameters.get("expected_speakers"),
                 }
                 def commit() -> None:
                     root.mkdir(parents=True)
@@ -576,9 +654,11 @@ class WorkbenchService:
 
     def public_job(self, job: dict[str, Any], *, include_result: bool = True) -> dict[str, Any]:
         fields = {"id", "filename", "status", "revision", "created_at", "started_at", "completed_at", "expires_at",
-                  "progress", "error", "result", "model_revision", "audio_asset", "audio_size_bytes",
+                  "progress", "error", "result", "model_revision", "audio_asset", "audio_size_bytes", "video_asset", "expected_speakers",
                   "retryability", "next_action", "next_attempt_at", "completeness", "gaps", "recovery"}
         payload = {key: value for key, value in job.items() if key in fields}
+        if include_result and payload.get("result"):
+            payload["result"] = speaker_view(payload["result"])
         if not include_result:
             payload.pop("result", None)
         payload["audio_size_bytes"] = int((job.get("audio_asset") or {}).get("size_bytes", 0))
@@ -691,20 +771,31 @@ class WorkbenchService:
                 continue
             await self.cleanup_operation(job_id)
             job = await self.store.run(self.store.job_metadata, job_id)
+            video = job.get("video_asset") or {"state": "unavailable"}
+            if video.get("state") == "ready":
+                try:
+                    await self.store.run(validate_video, self.job_dir(job_id) / "video.mp4", video)
+                except (AsrError, OSError):
+                    video = {"state": "failed", "error_code": "retained_video_invalid"}
+            elif video.get("state") == "preparing":
+                video = {"state": "queued"}
+            job["video_asset"] = video
+            job["video_reserved_bytes"] = 0
             metadata = job.get("audio_asset") or {"state": "preparing"}
             if metadata.get("state") != "ready" and (self.job_dir(job_id) / "source").exists():
                 await self.store.run((self.job_dir(job_id) / "audio.mp3").unlink, missing_ok=True)
             if metadata.get("state") == "ready":
                 try:
                     await self.store.run(validate_retained_audio, self.job_dir(job_id) / "audio.mp3", metadata)
-                    await self.store.run((self.job_dir(job_id) / "source").unlink, missing_ok=True)
+                    if video.get("state") in {"ready", "not_applicable", "unavailable"}:
+                        await self.store.run((self.job_dir(job_id) / "source").unlink, missing_ok=True)
                 except (AsrError, OSError):
                     metadata = {**metadata, "state": "failed", "error_code": "retained_audio_invalid"}
                     job["error"] = {"code": "retained_audio_invalid", "message": "saved playback audio failed identity validation", "details": {}}
                     self.terminal(job, "cancelled" if job.get("cancel_requested") else "failed")
             job["audio_asset"] = metadata
             await self.store.run(self.store.save_job, job)
-            await self.record_files(job_id, ["source", "audio.mp3"])
+            await self.record_files(job_id, ["source", "audio.mp3", "video.mp4"])
 
     async def cleanup_operation(self, job_id: str, *, locked: bool = True) -> None:
         root = self.job_dir(job_id)
@@ -714,7 +805,8 @@ class WorkbenchService:
                 if path.exists():
                     shutil.rmtree(path)
             for path in root.glob("*.partial*"):
-                path.unlink(missing_ok=True)
+                if job_id not in self.video_tasks or not path.name.startswith("video"):
+                    path.unlink(missing_ok=True)
         try:
             await asyncio.to_thread(remove)
         except OSError as exc:
@@ -735,7 +827,8 @@ class WorkbenchService:
             await lease.release()
         async def settle() -> None:
             current = await self.store.run(self.store.job_metadata, job_id)
-            names = list(current.get("retained_file_bytes", {}))
+            names = [name for name in current.get("retained_file_bytes", {})
+                     if job_id not in self.video_tasks or not name.startswith("video")]
             # Merge reviews and unsuccessful final calls can write durable
             # artifacts after the last successful chunk callback.
             checkpoint_names = await self.store.run(lambda: [str(path.relative_to(root))
@@ -745,14 +838,161 @@ class WorkbenchService:
             current = await self.store.run(self.store.job_metadata, job_id)
             retained = sum(current.get("retained_file_bytes", {}).values())
             reserved = await self.transaction(lambda db: db.execute("SELECT reserved_bytes FROM jobs WHERE id=?", (job_id,)).fetchone()[0])
-            if reserved != retained:
-                await self.store.run(self.store.save_job, current, reserved_bytes=retained)
+            desired = retained + int(current.get("video_reserved_bytes", 0))
+            if reserved != desired:
+                await self.store.run(self.store.save_job, current, reserved_bytes=desired)
             await self.sync_disk_reservations()
         if locked:
             async with self.lock:
                 await settle()
         else:
             await settle()
+
+    async def discard_ready_source(self, job_id: str) -> None:
+        async with self.lock:
+            job = await self.store.run(self.store.job_metadata, job_id)
+            if ((job.get("audio_asset") or {}).get("state") == "ready"
+                    and (job.get("video_asset") or {}).get("state", "not_applicable") in {"ready", "not_applicable"}):
+                source_bytes = int(job.get('retained_file_bytes', {}).get('source', 0))
+                reserved = await self.transaction(lambda db: int(db.execute('SELECT reserved_bytes FROM jobs WHERE id=?', (job_id,)).fetchone()[0]))
+                await self.store.run((self.job_dir(job_id) / "source").unlink, missing_ok=True)
+                await self.store.run(self.record_files_sync, job_id, ["source", "audio.mp3", "video.mp4"])
+                current = await self.store.run(self.store.job_metadata, job_id)
+                await self.store.run(self.store.save_job, current, reserved_bytes=max(sum(current.get('retained_file_bytes', {}).values()), reserved-source_bytes))
+                await self.sync_disk_reservations()
+
+    async def prepare_video_asset(self, job_id: str) -> None:
+        async with self.video_lock:
+            self.check_running(job_id)
+            job = await self.store.run(self.store.job_metadata, job_id)
+            state = (job.get("video_asset") or {}).get("state", "unavailable")
+            if state in {"ready", "not_applicable", "unavailable", "failed"}:
+                return
+            root = self.job_dir(job_id)
+            context = self.context_for(job)
+            lease: ResourceLease | None = None
+            written_bytes = 0
+            try:
+                info = await probe_video(root / "source", context)
+                if info is None:
+                    metadata: dict[str, Any] = {"state": "not_applicable"}
+                else:
+                    if self.video_encoder is None:
+                        self.video_encoder = await select_video_encoder(self.settings.video_encoder, context)
+                    async with self.lock:
+                        current = await self.store.run(self.store.job_metadata, job_id)
+                        current["video_asset"] = {"state": "preparing", "encoder": self.video_encoder}
+                        await self.store.run(self.store.save_job, current)
+                    async def video_progress(value: dict[str, Any]) -> None:
+                        self.check_running(job_id)
+                        async with self.lock:
+                            current = await self.store.run(self.store.job_metadata, job_id)
+                            if current.get("delete_requested"):
+                                raise WorkbenchInterrupted
+                            current["video_asset"]["progress"] = value
+                            await self.store.run(self.store.save_job, current)
+                    (root / "video.mp4").unlink(missing_ok=True)
+                    await self.reserve_video_processing(job_id, 8 * 1024 * 1024)
+                    lease = await self.app.state.workspace_manager.handoff_persistent(root, "video:" + job_id, 8 * 1024 * 1024)
+                    async def ensure(required: int) -> None:
+                        assert lease is not None
+                        if required > lease.size_bytes:
+                            desired = max(required, lease.size_bytes + 8 * 1024 * 1024)
+                            await self.reserve_video_processing(job_id, desired - written_bytes)
+                            await lease.grow_persistent(desired - lease.size_bytes)
+                    async def wrote(total: int) -> None:
+                        nonlocal written_bytes
+                        assert lease is not None
+                        delta = total - written_bytes
+                        await lease.materialize(delta)
+                        written_bytes = total
+                        async with self.lock:
+                            current = await self.store.run(self.store.job_metadata, job_id)
+                            current['video_reserved_bytes'] = max(0, int(current.get('video_reserved_bytes', 0)) - delta)
+                            await self.store.run(self.store.save_job, current)
+                            names = await self.store.run(lambda: [path.name for path in root.glob('video*.partial*')])
+                            await self.store.run(self.record_files_sync, job_id, names)
+                            await self.sync_disk_reservations()
+                    metadata = await prepare_video(root / "source", root / "video.mp4", info,
+                        context=context, ensure_capacity=ensure, written=wrote, encoder=self.video_encoder,
+                        progress=video_progress, max_fps=self.settings.video_max_fps)
+                async with self.lock:
+                    self.check_running(job_id)
+                    current = await self.store.run(self.store.job_metadata, job_id)
+                    if current.get("delete_requested"):
+                        raise WorkbenchInterrupted
+                    current["video_asset"] = metadata
+                    await self.store.run(self.store.save_job, current)
+            except (asyncio.CancelledError, WorkbenchInterrupted):
+                async with self.lock:
+                    current = await self.store.run(self.store.job_metadata, job_id)
+                    current["video_asset"] = {"state": "queued" if self.is_stopping() else "failed", "error_code": "video_interrupted"}
+                    await self.store.run(self.store.save_job, current)
+                raise
+            except Exception as exc:
+                async with self.lock:
+                    current = await self.store.run(self.store.job_metadata, job_id)
+                    current["video_asset"] = {"state": "failed", "error_code": exc.code if isinstance(exc, AsrError) else "video_preparation_failed"}
+                    await self.store.run(self.store.save_job, current)
+            finally:
+                if lease is not None:
+                    await lease.release()
+                async with self.lock:
+                    current = await self.store.run(self.store.job_metadata, job_id)
+                    physical_before = sum(current.get('retained_file_bytes', {}).values())
+                    reserved_before = await self.transaction(lambda db: int(db.execute('SELECT reserved_bytes FROM jobs WHERE id=?', (job_id,)).fetchone()[0]))
+                    audio_remaining = max(0, reserved_before - physical_before - int(current.get('video_reserved_bytes', 0)))
+                    if (current.get("video_asset") or {}).get("state") != "ready":
+                        await self.store.run((root / "video.mp4").unlink, missing_ok=True)
+                    names = sorted(set(["video.mp4", "video.partial.mp4", "video.faststart.partial.mp4", *[name for name in current.get('retained_file_bytes', {}) if name.startswith('video')]]))
+                    await self.store.run(self.record_files_sync, job_id, names)
+                    current = await self.store.run(self.store.job_metadata, job_id)
+                    current['video_reserved_bytes'] = 0
+                    await self.store.run(self.store.save_job, current,
+                        reserved_bytes=sum(current.get('retained_file_bytes', {}).values()) + audio_remaining)
+                    await self.sync_disk_reservations()
+            await self.discard_ready_source(job_id)
+
+    async def retry_video(self, owner: str, job_id: str) -> dict[str, Any]:
+        self.assert_accepting()
+        async with self.lock:
+            job = await self.store.run(self.store.job_metadata, job_id, owner)
+            if job.get("delete_requested") or job_id in self.active or job_id in self.video_tasks or job["status"] not in {"completed", "failed"}:
+                raise AsrError(409, "job_busy", "wait for the active operation before retrying video")
+            if (job.get("video_asset") or {}).get("state") not in {"failed", "queued"}:
+                raise AsrError(409, "video_not_retryable", "video does not need retrying")
+            if not (self.job_dir(job_id) / "source").exists():
+                raise AsrError(409, "source_unavailable", "original video is unavailable")
+            self.cancel_intents.discard(job_id)
+            self.contexts.pop(job_id, None)
+            job["video_asset"] = {"state": "queued"}
+            await self.store.run(self.store.save_job, job)
+        await self.fill_queue()
+        return self.public_job(await self.store.run(self.store.job, job_id, owner))
+
+    async def run_video_retry(self, job_id: str) -> None:
+        try:
+            job = await self.store.run(self.store.job_metadata, job_id)
+            if job.get("delete_requested") or job.get("cancel_requested"):
+                return
+            with bind_context(self.context_for(job)):
+                await self.prepare_video_asset(job_id)
+        except (asyncio.CancelledError, WorkbenchInterrupted):
+            pass
+        except Exception as exc:
+            emit("video.preparation_failed", error_code=getattr(exc, "code", "video_preparation_failed"))
+        finally:
+            self.video_tasks.pop(job_id, None)
+            async with self.lock:
+                try:
+                    job = await self.store.run(self.store.job_metadata, job_id)
+                except AsrError as exc:
+                    if exc.code != "job_not_found":
+                        raise
+                    return
+                if job.get("delete_requested") and job_id not in self.active and not self.playback_consumers.get(job_id):
+                    await self.delete_now(job)
+            await self.fill_video_queue()
 
     async def prepare_audio(self, job_id: str) -> NormalizedAudioAsset:
         self.check_running(job_id)
@@ -798,8 +1038,7 @@ class WorkbenchService:
                     current["audio_asset"] = metadata
                     await self.store.run(self.store.save_job, current)
                 await self.record_files(job_id, ["source", "audio.mp3", "audio.partial.mp3"])
-                await self.store.run(source.unlink, missing_ok=True)
-                await self.record_files(job_id, ["source", "audio.mp3"])
+                await self.discard_ready_source(job_id)
             except BaseException:
                 async with self.lock:
                     current = await self.store.run(self.store.job_metadata, job_id)
@@ -811,6 +1050,7 @@ class WorkbenchService:
                 await lease.release()
         else:
             await self.store.run(validate_retained_audio, playback, metadata)
+        await self.queue_video(job_id)
         self.check_running(job_id)
         await self.audio_phase(job_id, "preparing_recognition_audio")
         operation = root / "operation"
@@ -896,12 +1136,13 @@ class WorkbenchService:
             if asset is None:
                 asset = await self.prepare_audio(job_id)
             self.check_running(job_id)
+            await self.wait_for_video_capacity(job_id)
             workspace.mkdir(exist_ok=True)
             async def stage(phase: str, progress: dict[str, object]) -> None:
                 self.check_running(job_id)
                 self.progress[job_id] = {**self.progress.get(job_id, {}), **progress, "phase": phase}
                 moment = time.monotonic()
-                immediate = "completed_chunks" in progress or moment - self.progress_saved.get(job_id, 0) >= 1
+                immediate = "completed_chunks" in progress or "current_chunk" in progress or moment - self.progress_saved.get(job_id, 0) >= 1
                 if not immediate:
                     return
                 async with self.lock:
@@ -918,7 +1159,8 @@ class WorkbenchService:
                 await self.record_files(job_id, names)
                 async with self.lock:
                     self.check_running(job_id)
-                    await self.store.run(self.store.save_chunk, job_id, {"index": index, "text": result.text}, total,
+                    await self.store.run(self.store.save_chunk, job_id, {"index": index, "text": result.text,
+                        "resolution": "pending" if "moss_coverage_pending" in result.warnings else "resolved"}, total,
                         **self.attempt_arguments(job_id))
                     self.progress_saved[job_id] = time.monotonic()
             result = await run_transcription_path(
@@ -929,6 +1171,10 @@ class WorkbenchService:
             )
             self.check_running(job_id)
             self.prepare_result(result, segment_timestamps=definition.capabilities.segment_timestamps)
+            ensure_speakers(result)
+            result["expected_speakers"] = job.get("expected_speakers")
+            if job.get("expected_speakers") is not None and len(speaker_view(dict(result))["speakers"]) != job["expected_speakers"]:
+                result["speaker_count_mismatch"] = True
             await self.cleanup_operation(job_id)
             async with self.lock:
                 self.check_running(job_id)
@@ -1018,6 +1264,8 @@ class WorkbenchService:
                             current = await self.store.run(self.store.job, job_id)
                             current["error"] = {"code": error.code, "message": error.message, "details": details}
                             self.prepare_result(partial, segment_timestamps=definition.capabilities.segment_timestamps)
+                            ensure_speakers(partial)
+                            partial["expected_speakers"] = current.get("expected_speakers")
                             self.result_version(partial, current)
                             current["result"] = partial
                             current["completeness"] = partial.get("completeness", {"complete": False})
@@ -1047,10 +1295,10 @@ class WorkbenchService:
             try:
                 async with self.lock:
                     job = (await self.store.run(self.store.job_metadata, job_id))
-                    if job.get("delete_requested") and not self.playback_consumers.get(job_id, 0):
+                    if job.get("delete_requested") and job_id not in self.video_tasks and not self.playback_consumers.get(job_id, 0):
                         await self.delete_now(job)
                     elif root.exists():
-                        reserved = sum(job.get("retained_file_bytes", {}).values())
+                        reserved = sum(job.get("retained_file_bytes", {}).values()) + int(job.get("video_reserved_bytes", 0))
                         existing = await self.transaction(lambda db: db.execute("SELECT reserved_bytes FROM jobs WHERE id=?", (job_id,)).fetchone()[0])
                         if existing != reserved:
                             await self.store.run(self.store.save_job, job, reserved_bytes=reserved)
@@ -1091,6 +1339,9 @@ class WorkbenchService:
         result["versions"] = [{"version": 1, "created_at": now(), "alignment_status": result["alignment_status"]}]
 
     async def finish_cancel(self, job: dict[str, Any]) -> None:
+        video_task = self.video_tasks.get(job["id"])
+        if video_task is not None and video_task is not asyncio.current_task():
+            await asyncio.shield(video_task)
         await self.cleanup_operation(job["id"])
         async with self.lock:
             try:
@@ -1112,21 +1363,27 @@ class WorkbenchService:
             emit("job.cancelled")
 
     async def cancel(self, owner: str, job_id: str) -> dict[str, Any]:
+        video_only = False
         async with self.lock:
-            job = (await self.store.run(self.store.job, job_id, owner))
+            job = await self.store.run(self.store.job, job_id, owner)
             if job["status"] in TERMINAL:
-                return self.public_job(job)
-            job["status"] = "cancel_requested"
-            job["cancel_requested"] = True
+                if (job.get("video_asset") or {}).get("state") not in {"queued", "preparing"}:
+                    return self.public_job(job)
+                video_only = True
+                job["video_asset"] = {"state": "failed", "error_code": "video_interrupted"}
+            else:
+                job["status"] = "cancel_requested"
+                job["cancel_requested"] = True
             self.cancel_intents.add(job_id)
             self.context_for(job).cancel_event.set()
-            (await self.store.run(self.store.save_job, job))
-        removed = await self.app.state.job_manager.cancel_external(job_id)
-        async with self.lock:
-            finish_now = removed or job_id not in self.active
-        if finish_now:
-            await self.finish_cancel(job)
-        return self.public_job((await self.store.run(self.store.job, job_id, owner)))
+            await self.store.run(self.store.save_job, job)
+        removed = await self.app.state.job_manager.cancel_external(("video:" if video_only else "") + job_id)
+        if not video_only:
+            async with self.lock:
+                finish_now = removed or job_id not in self.active
+            if finish_now:
+                await self.finish_cancel(job)
+        return self.public_job(await self.store.run(self.store.job, job_id, owner))
 
     async def delete(self, owner: str, job_id: str) -> bool:
         async with self.lock:
@@ -1139,6 +1396,7 @@ class WorkbenchService:
             (await self.store.run(self.store.save_job, job))
         await self.app.state.job_manager.cancel_external(job_id)
         await self.app.state.job_manager.cancel_external("align:" + job_id)
+        await self.app.state.job_manager.cancel_external("video:" + job_id)
         async with self.lock:
             try:
                 job = await self.store.run(self.store.job_metadata, job_id, owner)
@@ -1146,7 +1404,7 @@ class WorkbenchService:
                 if exc.code == "job_not_found":
                     return True
                 raise
-            if job_id in self.active or self.playback_consumers.get(job_id, 0):
+            if job_id in self.active or job_id in self.video_tasks or self.playback_consumers.get(job_id, 0):
                 return False
             await self.delete_now(job)
             return True
@@ -1175,15 +1433,16 @@ class WorkbenchService:
         self.preparation_errors.pop(job["id"], None)
         self.prepared_assets.pop(job["id"], None)
 
-    async def acquire_playback(self, owner: str, job_id: str) -> Path:
+    async def acquire_playback(self, owner: str, job_id: str, *, video: bool = False) -> Path:
         async with self.lock:
             job = await self.store.run(self.store.job_metadata, job_id, owner)
-            state = (job.get("audio_asset") or {}).get("state", "preparing")
-            path = self.job_dir(job_id) / "audio.mp3"
+            kind = "video" if video else "audio"
+            state = (job.get(kind + "_asset") or {}).get("state", "preparing")
+            path = self.job_dir(job_id) / ("video.mp4" if video else "audio.mp3")
             if job.get("delete_requested"):
                 raise AsrError(409, "job_deleting", "task deletion is in progress")
             if state != "ready" or not path.exists():
-                raise AsrError(409, "audio_not_ready", "playback audio is not ready", {"state": state})
+                raise AsrError(409, kind + "_not_ready", "playback media is not ready", {"state": state})
             self.playback_consumers[job_id] = self.playback_consumers.get(job_id, 0) + 1
             return path
 
@@ -1194,7 +1453,7 @@ class WorkbenchService:
                 self.playback_consumers[job_id] = remaining
                 return
             self.playback_consumers.pop(job_id, None)
-            if job_id not in self.active:
+            if job_id not in self.active and job_id not in self.video_tasks:
                 job = await self.store.run(self.store.job_metadata, job_id)
                 if job.get("delete_requested"):
                     await self.delete_now(job)
@@ -1204,6 +1463,8 @@ class WorkbenchService:
         async with self.lock:
             job = (await self.store.run(self.store.job, job_id, owner))
             self.assert_accepting(job["request"]["model"])
+            if job_id in self.active or job_id in self.video_tasks:
+                raise AsrError(409, "job_busy", "wait for the active operation before retrying transcription")
             if job["status"] not in {"failed", "cancelled"}:
                 raise AsrError(409, "job_not_retryable", "only failed or cancelled tasks can be retried")
             if not (self.job_dir(job_id) / "audio.mp3").exists() and not (self.job_dir(job_id) / "source").exists():
@@ -1274,49 +1535,98 @@ class WorkbenchService:
                 "audio_asset": job.get("audio_asset"), "normalized_asset": job.get("normalized_asset"), "chunk_windows": windows}),
             "imported_at": now()})
 
-    async def edit(self, owner: str, job_id: str, segment_id: str, text: str, base_version: int) -> dict[str, Any]:
-        self.assert_accepting()
+    async def editable_job(self, owner: str, job_id: str, base_version: int) -> dict[str, Any]:
+        job = await self.store.run(self.store.job, job_id, owner)
+        result = job.get("result")
+        if job.get("delete_requested") or job["status"] != "completed" or result is None:
+            raise AsrError(409, "job_not_completed", "only completed transcripts can be edited")
+        if result["version"] != base_version:
+            raise AsrError(409, "version_conflict", "transcript changed; refresh before editing")
+        if result["alignment_status"] == "pending":
+            raise AsrError(409, "alignment_pending", "wait for the current edit to finish alignment")
+        ensure_speakers(result)
+        return job
+
+    async def save_edit(self, job: dict[str, Any], changes: list[dict[str, Any]]) -> None:
+        result = job["result"]
+        result["version"] += 1
+        for change in changes:
+            result.setdefault("changes", []).append({**change, "created_at": now(), "version": result["version"]})
+        result["versions"].append({"version": result["version"], "created_at": now(), "alignment_status": result["alignment_status"]})
+        await self.store.run(self.check_capacity, job["owner_id"], len(json.dumps(result, ensure_ascii=False).encode("utf-8")))
+        await self.store.run(self.store.save_version, job)
+
+    async def edit(self, owner: str, job_id: str, segment_id: str, text: str | None, base_version: int,
+                   *, speaker_id: str | None = None, assign_speaker: bool = False) -> dict[str, Any]:
         async with self.lock:
-            job = (await self.store.run(self.store.job, job_id, owner))
-            self.assert_accepting(job["request"]["model"])
-            result = job.get("result")
-            if job["status"] != "completed" or result is None:
-                raise AsrError(409, "job_not_completed", "only completed transcripts can be edited")
-            definition = self.app.state.manager.runtime_for(job["request"]["model"]).definition
-            if not definition.capabilities.forced_alignment:
-                raise AsrError(422, "capability_not_supported", "selected model does not support transcript edit alignment")
-            if result["version"] != base_version:
-                raise AsrError(409, "version_conflict", "transcript changed; refresh before editing")
-            if result["alignment_status"] == "pending":
-                raise AsrError(409, "alignment_pending", "wait for the current edit to finish alignment")
-            segment = next((s for s in result["segments"] if s["id"] == segment_id), None)
-            if segment is None:
+            job = await self.editable_job(owner, job_id, base_version)
+            result = job["result"]
+            target = next((s for s in result["segments"] if s["id"] == segment_id), None)
+            if target is None:
                 raise AsrError(404, "segment_not_found", "segment not found")
-            if len(text) > 20000:
-                raise AsrError(400, "bad_request", "edited segment is too long")
-            result = copy.deepcopy(result)
-            target = next(s for s in result["segments"] if s["id"] == segment_id)
-            previous_text = target["text"]
-            target["text"] = text.strip()
-            target["timestamps"] = []
-            target["alignment_status"] = "pending"
-            result["version"] += 1
-            result["alignment_status"] = "pending"
-            result["pending_segment_id"] = segment_id
-            result["text"] = "\n\n".join(s["text"] for s in result["segments"] if s["text"])
-            # Never publish the old timeline alongside new text.
-            result["timestamps"] = []
-            result.setdefault("changes", []).append({"method": "user_edit", "segment_id": segment_id,
-                "before": previous_text, "after": text.strip(), "created_at": now(), "version": result["version"]})
-            result["versions"].append({"version": result["version"], "created_at": now(), "alignment_status": "pending"})
-            await self.store.run(self.check_capacity, owner, len(json.dumps(result, ensure_ascii=False).encode("utf-8")))
-            job["result"] = result
-            (await self.store.run(self.store.save_version, job))
-            try:
-                await self.enqueue_alignment(job_id)
-            except AsrError as exc:
-                if exc.code != "job_queue_full":
-                    raise
+            definition = self.app.state.manager.runtime_for(job["request"]["model"]).definition
+            changes: list[dict[str, Any]] = []
+            align = False
+            if assign_speaker:
+                if not definition.capabilities.diarization:
+                    raise AsrError(422, "capability_not_supported", "model does not support speakers")
+                if speaker_id is not None and speaker_id not in result["speakers"]:
+                    raise AsrError(404, "speaker_not_found", "speaker not found")
+                if speaker_id != target.get("speaker_id") or target.get("speaker_assignment") != "user":
+                    changes.append({"method": "speaker_assignment", "segment_id": segment_id, "before": target.get("speaker_id"), "after": speaker_id})
+                    target["speaker_id"] = speaker_id
+                    target["speaker_assignment"] = "user"
+            if text is not None and text.strip() != target["text"]:
+                if not text.strip() or len(text) > 20000:
+                    raise AsrError(400, "bad_request", "edited text must be nonempty and at most 20000 characters")
+                if not (definition.capabilities.forced_alignment or definition.capabilities.segment_timestamps):
+                    raise AsrError(422, "capability_not_supported", "model does not support timed text edits")
+                changes.append({"method": "user_edit", "segment_id": segment_id, "before": target["text"], "after": text.strip()})
+                target["text"] = text.strip()
+                target["text_edited"] = True
+                result["text"] = "\n\n".join(s["text"] for s in result["segments"] if s["text"])
+                align = definition.capabilities.forced_alignment
+                if align:
+                    self.assert_accepting(job["request"]["model"])
+                    target["timestamps"] = []
+                    target["alignment_status"] = "pending"
+                    result["timestamps"] = []
+                    result["alignment_status"] = "pending"
+                    result["pending_segment_id"] = segment_id
+            if changes:
+                await self.save_edit(job, changes)
+                if align:
+                    try:
+                        await self.enqueue_alignment(job_id)
+                    except AsrError as exc:
+                        if exc.code != "job_queue_full":
+                            raise
+            return self.public_job(job)
+
+    async def edit_speaker(self, owner: str, job_id: str, name: str, base_version: int,
+                           speaker_id: str | None = None) -> dict[str, Any]:
+        async with self.lock:
+            job = await self.editable_job(owner, job_id, base_version)
+            if not self.app.state.manager.runtime_for(job["request"]["model"]).definition.capabilities.diarization:
+                raise AsrError(422, "capability_not_supported", "model does not support speakers")
+            name = name.strip()
+            if not name or len(name) > 120 or any(ord(c) < 32 for c in name):
+                raise AsrError(400, "bad_request", "speaker name must contain 1 to 120 printable characters")
+            people = job["result"]["speakers"]
+            if speaker_id is None:
+                if len(people) >= 256:
+                    raise AsrError(400, "bad_request", "speaker limit reached")
+                speaker_id = f"P{max([int(k[1:]) for k in people] or [0]) + 1}"
+                people[speaker_id] = {"name": name, "scope": "global", "source": "user"}
+                change = {"method": "speaker_create", "speaker_id": speaker_id, "after": name}
+            else:
+                if speaker_id not in people:
+                    raise AsrError(404, "speaker_not_found", "speaker not found")
+                change = {"method": "speaker_rename", "speaker_id": speaker_id, "before": people[speaker_id]["name"], "after": name}
+                if people[speaker_id]["name"] == name:
+                    return self.public_job(job)
+                people[speaker_id]["name"] = name
+            await self.save_edit(job, [change])
             return self.public_job(job)
 
     async def enqueue_alignment(self, job_id: str) -> None:
@@ -1395,7 +1705,7 @@ class WorkbenchService:
                 self.active.discard(job_id)
             try:
                 job = (await self.store.run(self.store.job, job_id))
-                if job.get("delete_requested") and not self.playback_consumers.get(job_id, 0):
+                if job.get("delete_requested") and job_id not in self.video_tasks and not self.playback_consumers.get(job_id, 0):
                     await self.delete_now(job)
             except AsrError:
                 pass
@@ -1416,7 +1726,7 @@ class WorkbenchService:
         for row in jobs:
             # A running operation updates its files at durable chunk boundaries.
             # Do not overwrite its in-flight accounting with a racy scan.
-            if row["id"] in self.active:
+            if row["id"] in self.active or row["id"] in self.video_tasks:
                 continue
             root = self.job_dir(row["id"])
             files: dict[str, int] = {}
@@ -1445,7 +1755,7 @@ class WorkbenchService:
             pending = await self.transaction(lambda db: db.execute("SELECT id FROM jobs WHERE status='cleanup_pending' OR json_extract(payload,'$.delete_requested')=1").fetchall())
             for row in pending:
                 key = row["id"]
-                if key in self.active or self.playback_consumers.get(key, 0):
+                if key in self.active or key in self.video_tasks or self.playback_consumers.get(key, 0):
                     continue
                 try:
                     task = await self.store.run(self.store.job_metadata, key)
@@ -1462,7 +1772,7 @@ class WorkbenchService:
                         raise
             expired_ids = await self.transaction(lambda db: db.execute("SELECT id FROM jobs WHERE status IN ('completed','failed','cancelled') AND json_extract(summary,'$.expires_at')<=?", (now(),)).fetchall())
             for row in expired_ids:
-                if row["id"] not in self.active and not self.playback_consumers.get(row["id"], 0):
+                if row["id"] not in self.active and row["id"] not in self.video_tasks and not self.playback_consumers.get(row["id"], 0):
                     await self.delete_now(await self.store.run(self.store.job, row["id"]))
             def cleanup_rows(db: sqlite3.Connection) -> tuple[set[str], set[str]]:
                 expired = db.execute("SELECT id,owner_id FROM uploads WHERE job_id IS NULL AND expires_at<=?", (now(),)).fetchall()

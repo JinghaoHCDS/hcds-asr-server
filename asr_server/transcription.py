@@ -514,9 +514,22 @@ async def run_transcription_path(
         if plan.execution_mode == "native_long_form"
         else [chunk.as_audio_input() for chunk in split.chunks]
     )
+    moss_gaps: list[dict[str, object]] = []
+    moss_quality: dict[str, object] | None = None
     anchor_sequence: AnchorReplaySequence | None = None
     if request.speaker_resolution != "off" and len(split.chunks) > 1:
         anchor_sequence = AnchorReplaySequence(split.chunks)
+    if checkpoint_dir is not None and manager.runtime_for(checked.selected_model).definition.engine_id == "moss":
+        from asr_server.diarization.recovery import run_moss_chunks
+        moss_asset = normalized_asset
+        if moss_asset is None:
+            moss_asset = await asyncio.to_thread(NormalizedAudioAsset.from_path, normalized.path)
+        resolved_backend, chunk_results, timings, moss_gaps, moss_quality = await run_moss_chunks(
+            manager=manager, request=request, checked=checked, chunks=split.chunks, asset=moss_asset,
+            directory=checkpoint_dir, max_new_tokens=resolved_max_new_tokens, sequence=anchor_sequence,
+            cancel_event=cancel_event, before_chunk=guarded_before_chunk, after_chunk=guarded_after_chunk,
+        )
+    elif anchor_sequence is not None:
         resolved_backend, chunk_results, timings = await manager.transcribe_sequence(
             anchor_sequence,
             model_id=checked.selected_model,
@@ -555,7 +568,7 @@ async def run_transcription_path(
         checked.supports_diarization,
         chunk_results,
     )
-    if request.speaker_resolution == "required" and diarization is not None and diarization["status"] != "complete":
+    if not moss_gaps and request.speaker_resolution == "required" and diarization is not None and diarization["status"] != "complete":
         raise AsrError(
             422,
             "speaker_resolution_incomplete",
@@ -589,7 +602,7 @@ async def run_transcription_path(
         vad_based_chunks=split.strategy in {"energy", "silero"},
         pause_threshold_seconds=request.pause_threshold_seconds,
     )
-    return transcription_payload(
+    payload = transcription_payload(
         id_=f"tr_{uuid4().hex}",
         selected_model=checked.selected_model,
         resolved_backend=resolved_backend,
@@ -609,6 +622,20 @@ async def run_transcription_path(
         timing=timing,
         purpose=request.purpose,
     )
+
+    if moss_quality is not None:
+        payload["quality"] = moss_quality
+        payload["completeness"] = {"complete": not moss_gaps, "gap_count": len(moss_gaps),
+            "total_chunks": len(split.chunks), "attempted_chunks": len(split.chunks),
+            "resolved_chunks": len(split.chunks) - len({gap["chunk_index"] for gap in moss_gaps})}
+        payload["gaps"] = moss_gaps
+        if moss_gaps:
+            payload.update(retryability="exhausted", next_action="listen_or_change_parameters")
+            raise AsrError(422, "quality_incomplete", "MOSS transcript retained with unresolved review intervals",
+                {"partial_result": payload, "completeness": payload["completeness"], "gaps": moss_gaps,
+                 "retryability": "exhausted", "next_action": "listen_or_change_parameters"})
+    return payload
+
 
 
 def transcription_payload(

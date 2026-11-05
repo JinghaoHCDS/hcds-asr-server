@@ -195,12 +195,16 @@ class ProcessRpcTransport:
             self._poisoned = True
             self.close(force=True)
             details["worker_reaped"] = self._process is None
-        raise AsrError(
+        failure = AsrError(
             status_code,
             code,
             str(error.get("message", f"{self.name} worker failed")),
             details,
         )
+        if code == "incomplete_transcript" and isinstance(error.get("partial_transcription"), dict):
+            from asr_server.workers.codec import result_from_payload
+            failure.partial_transcription = result_from_payload(error["partial_transcription"])
+        raise failure
 
     def shutdown(self, *, timeout_seconds: float, cuda_empty_cache: bool = True) -> None:
         if self._process is None:

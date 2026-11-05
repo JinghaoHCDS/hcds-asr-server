@@ -19,6 +19,7 @@ export default function UploadPane({ user, caps, storage, storageError = '', cap
   const [language, setLanguage] = useState('auto');
   const [model, setModel] = useState('');
   const [profile, setProfile] = useState('');
+  const [expectedSpeakers, setExpectedSpeakers] = useState('');
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState('');
@@ -100,7 +101,7 @@ export default function UploadPane({ user, caps, storage, storageError = '', cap
     if (abort.current) throw new Error('上传已暂停，重新选择相同文件可继续');
     update(row.key, { state: '提交任务', percent: 100 });
     const job = await api<Job>(`/uploads/${upload!.id}/complete`, { method: 'POST', body: JSON.stringify({ domain, hotwords, language: selectedLanguage,
-      model: selectedModel.id, quality_profile: selectedProfile, idempotency_key: `upload:${record.id}` }) });
+      model: selectedModel.id, quality_profile: selectedProfile, speaker_resolution: selectedModel.capabilities.diarization ? "auto" : "off", expected_speakers: selectedModel.capabilities.diarization && expectedSpeakers ? Number(expectedSpeakers) : null, idempotency_key: `upload:${record.id}` }) });
     persist(savedRef.current.filter(v => v.id !== record.id));
     update(row.key, { state: '已加入队列', percent: 100, job });
     onSubmitted();
@@ -122,7 +123,7 @@ export default function UploadPane({ user, caps, storage, storageError = '', cap
     <section className="panel upload-panel"><div className="panel-heading"><div className="step-number">01</div><div><h2>添加素材</h2><p>选择音频或视频，支持多个文件依次处理。</p></div><span className="badge">多文件排队</span></div>
       <input ref={picker} name="media" type="file" multiple accept="audio/*,video/*,.mkv,.flac,.m4a,.opus" className="visually-hidden" disabled={busy} onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }} />
       <button type="button" className={`drop-zone ${drag ? 'dragging' : ''}`} disabled={busy} onClick={() => picker.current?.click()} onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={drop}><span className="upload-symbol"><Icon name="upload" size={28} /></span><strong>把音频或视频拖到这里</strong><span>或 <u>选择本地文件</u></span><small>MP3、WAV、M4A、MP4、MOV 等常见格式<br />最长 {caps ? Math.floor(caps.max_duration_seconds / 3600) : 6} 小时，单文件最高 {bytes(caps?.max_upload_bytes ?? 8 * 1024 ** 3)}</small></button>
-      <p className="footnote upload-audio-policy">素材将保存为高质量 MP3，原始音视频在转换完成后删除；任务结束后保留 {caps?.retention_days ?? 7} 天。</p>
+      <p className="footnote upload-audio-policy">音频保存为 MP3，视频另保留最高 1080p 回看版；所需媒体均保存成功后删除原文件；任务结束后保留 {caps?.retention_days ?? 7} 天。</p>
       {error && <p className="inline-error" role="alert">{error}</p>}
       {rows.length > 0 && <div className="upload-files">{rows.map(row => <div className="upload-file" key={row.key}><Icon name={row.job ? 'check' : 'file'} size={20} /><div><strong title={row.file.name}>{row.file.name}</strong><span>{bytes(row.file.size)}，{row.state}{['校验文件', '上传中'].includes(row.state) ? ` ${Math.floor(row.percent)}%` : ''}</span>{['校验文件', '上传中'].includes(row.state) && <div className="progress-track" role="progressbar" aria-label={`${row.file.name} ${row.state}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.floor(row.percent)}><i style={{ transform: `scaleX(${row.percent / 100})` }} /></div>}{row.error && <span className="inline-error">{row.error}</span>}</div>{!busy && <button type="button" className="icon-button" aria-label={`移除 ${row.file.name}`} onClick={() => setRows(old => old.filter(v => v.key !== row.key))}><Icon name="close" size={16} /></button>}</div>)}</div>}
       {saved.length > 0 && <div className="resume-note"><Icon name="refresh" size={18} /><div><strong>{saved.length} 个上传可以继续</strong><p>重新选择下列原文件，校验后从服务器保存的位置继续。继续前请确认本页的领域和热词。</p>{saved.map(s => <div className="resume-file" key={s.id}><span>{s.filename}，{bytes(s.size)}</span><button type="button" className="text-link" disabled={busy} onClick={() => void removeUpload(s)}>取消上传并删除</button></div>)}</div></div>}
@@ -133,6 +134,7 @@ export default function UploadPane({ user, caps, storage, storageError = '', cap
       <details className="advanced"><summary>更多设置</summary>
         <label className="field-label">转录模型<select name="model" value={selectedModel?.id || ''} disabled={busy} onChange={e => { setModel(e.target.value); setProfile(''); }}>{availableModels.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.id}</option>)}</select></label>
         <label className="field-label">转录流程<select name="quality_profile" value={selectedProfile || ''} disabled={busy} onChange={e => setProfile(e.target.value)}>{availableProfiles.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}</select></label>
+        {selectedModel?.capabilities.diarization && <label className="field-label">预计说话人数<select value={expectedSpeakers} disabled={busy} onChange={e => setExpectedSpeakers(e.target.value)}><option value="">自动识别</option>{[1,2,3,4].map(n => <option key={n} value={n}>{n} 人</option>)}</select></label>}
         <label className="field-label">音频语言<select name="language" value={selectedLanguage} disabled={busy} onChange={e => setLanguage(e.target.value)}>{availableLanguages.map(code => <option key={code} value={code}>{({ auto: '自动识别', zh: '中文', en: '英文' } as Record<string, string>)[code] || code}</option>)}</select></label>
       </details>
       {!caps && <p className={`upload-config-state ${capsError ? 'inline-error' : 'muted'}`} role={capsError ? 'alert' : 'status'}>{capsError ? `转录配置暂时无法读取：${capsError}` : '正在读取转录配置，完成后即可开始。'}</p>}
@@ -141,5 +143,5 @@ export default function UploadPane({ user, caps, storage, storageError = '', cap
       {selectedProfile === 'quality_v1' && caps?.quality_profiles.some(p => p.id === 'quality_v1' && p.validated === false) && <p className="footnote">当前转录流程处于试运行阶段，正在进行真实长音频验收。可通过结果页回听、校对后交付。</p>}
       {rows.some(v => v.job) && <button type="button" className="text-link uploaded-link" onClick={onOpenJobs}>前往我的任务，查看处理进度 <Icon name="arrow" size={15} /></button>}
     </section>
-  </div><aside className="upload-aside"><div className="guide-card"><h3>处理与保留说明</h3><div className="guide-step"><b>1</b><div><strong>上传完成后可离开</strong><p>文件上传完成后，任务会在服务器继续处理。</p></div></div><div className="guide-step"><b>2</b><div><strong>转录与复核</strong><p>系统自动处理长音频，并检查需要复核的片段。</p></div></div><div className="guide-step"><b>3</b><div><strong>回听校对与导出</strong><p>点击文字回到回听音频，保留修改记录和字幕版本。</p></div></div><div className="retention-note"><Icon name="headphones" size={18} /><span>任务结束后保留 {caps?.retention_days ?? 7} 天<br /><small>可随时手动删除</small></span></div></div>{storage ? <StorageMeter storage={storage} /> : !storageError && <div className="storage-meter" role="status" aria-busy="true"><p className="muted">正在读取容量…</p><div className="loading-lines" aria-hidden="true"><i /><i /></div></div>}{storageError && <p className="inline-error" role="status">容量暂时无法更新：{storageError}。下次操作或返回页面时会重新读取。</p>}</aside></div>;
+  </div><aside className="upload-aside"><div className="guide-card"><h3>处理与保留说明</h3><div className="guide-step"><b>1</b><div><strong>上传完成后可离开</strong><p>文件上传完成后，任务会在服务器继续处理。</p></div></div><div className="guide-step"><b>2</b><div><strong>转录与复核</strong><p>系统自动处理长音频，并检查需要复核的片段。</p></div></div><div className="guide-step"><b>3</b><div><strong>回听校对与导出</strong><p>点击文字回看对应画面或回听音频，校对人物和内容。</p></div></div><div className="retention-note"><Icon name="headphones" size={18} /><span>任务结束后保留 {caps?.retention_days ?? 7} 天<br /><small>可随时手动删除</small></span></div></div>{storage ? <StorageMeter storage={storage} /> : !storageError && <div className="storage-meter" role="status" aria-busy="true"><p className="muted">正在读取容量…</p><div className="loading-lines" aria-hidden="true"><i /><i /></div></div>}{storageError && <p className="inline-error" role="status">容量暂时无法更新：{storageError}。下次操作或返回页面时会重新读取。</p>}</aside></div>;
 }

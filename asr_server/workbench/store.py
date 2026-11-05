@@ -17,7 +17,7 @@ from asr_server.workbench.security import password_hash, token_hash
 
 P = ParamSpec("P")
 T = TypeVar("T")
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def _summary_sql(payload: str) -> str:
@@ -25,6 +25,7 @@ def _summary_sql(payload: str) -> str:
     pairs = [f"'{field}',json_extract({payload},'$.{field}')" for field in fields]
     pairs += [
         f"'model',json_extract({payload},'$.request.model')",
+        "'video_asset',json_object(" + ",".join(f"'{key}',json_extract({payload},'$.video_asset.{key}')" for key in ["state", "size_bytes", "width", "height", "duration_seconds", "encoder", "progress"]) + ")",
         f"'audio_size_bytes',coalesce(json_extract({payload},'$.audio_asset.size_bytes'),0)",
         "'audio_asset',json_object(" + ",".join(f"'{key}',json_extract({payload},'$.audio_asset.{key}')" for key in
             ["state", "codec", "bitrate_bps", "sample_rate", "channels", "size_bytes", "duration_seconds", "source_stream_index", "source_audio_streams"]) + ")",
@@ -148,13 +149,32 @@ class WorkbenchStore:
             }, ensure_ascii=False)))
             if schema < SCHEMA_VERSION:
                 self._migrate(db)
+            self._refresh_summary_projection(db)
         self.initialized = True
+
+    def _refresh_summary_projection(self, db: sqlite3.Connection) -> None:
+        """Refresh derived list fields even when the durable schema is unchanged."""
+        definitions = {
+            "jobs_summary_insert": f"AFTER INSERT ON jobs BEGIN UPDATE jobs SET summary={_summary_sql('new.payload')} WHERE id=new.id; END",
+            "jobs_summary_update": f"AFTER UPDATE OF payload,status ON jobs BEGIN UPDATE jobs SET summary={_summary_sql('new.payload')},revision=old.revision+1 WHERE id=new.id; END",
+        }
+        changed = False
+        for name, body in definitions.items():
+            sql = f"CREATE TRIGGER {name} {body}"
+            existing = db.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)).fetchone()
+            if existing is not None and existing[0] == sql:
+                continue
+            db.execute(f"DROP TRIGGER IF EXISTS {name}")
+            db.execute(sql)
+            changed = True
+        if changed:
+            db.execute(f"UPDATE jobs SET summary={_summary_sql('payload')}")
 
     def close(self) -> None:
         self.executor.close()
 
     def _migrate(self, db: sqlite3.Connection) -> None:
-        """Upgrade schema 4 in place; older populated audio layouts need their original migration."""
+        """Upgrade schemas 4/5 in place; older populated audio layouts need their original migration."""
         for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall():
             db.execute(f'DROP TRIGGER "{name}"')
         columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
@@ -687,9 +707,14 @@ class WorkbenchStore:
         """Only unwritten media promises; SQLite payloads are already materialized."""
         with self.connection() as db:
             uploads = db.execute("SELECT id,size_bytes-offset FROM uploads WHERE job_id IS NULL AND size_bytes>offset").fetchall()
-            jobs = db.execute("SELECT j.id,j.reserved_bytes-coalesce(a.physical_bytes,0) FROM jobs j LEFT JOIN assets a ON a.asset_id=j.id WHERE j.reserved_bytes>coalesce(a.physical_bytes,0)").fetchall()
-        return {**{"upload:" + str(row[0]): int(row[1]) for row in uploads},
-                **{"job:" + str(row[0]): int(row[1]) for row in jobs}}
+            jobs = db.execute("SELECT j.id,j.reserved_bytes-coalesce(a.physical_bytes,0),coalesce(json_extract(j.payload,'$.video_reserved_bytes'),0) FROM jobs j LEFT JOIN assets a ON a.asset_id=j.id WHERE j.reserved_bytes>coalesce(a.physical_bytes,0)").fetchall()
+        declarations = {"upload:" + str(row[0]): int(row[1]) for row in uploads}
+        for row in jobs:
+            video = min(max(0, int(row[2])), int(row[1]))
+            declarations["job:" + str(row[0])] = int(row[1]) - video
+            if video:
+                declarations["video:" + str(row[0])] = video
+        return declarations
 
     @staticmethod
     def file_categories(sizes: dict[str, Any]) -> tuple[int, int]:

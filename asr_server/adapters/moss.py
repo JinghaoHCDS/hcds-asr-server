@@ -379,14 +379,20 @@ class _MossWorkerBackend:
                 inspect_audio_path(audio_path),
                 padding_seconds=0.0,
             )
-            audible_end, uncovered_speech = self._validate_speech_coverage(
-                duration=duration,
-                coverage_end=coverage_end,
-                segments=segments,
-                speech_intervals=speech_intervals,
-            )
+            coverage_error: AsrError | None = None
+            try:
+                audible_end, uncovered_speech = self._validate_speech_coverage(
+                    duration=duration, coverage_end=coverage_end, segments=segments,
+                    speech_intervals=speech_intervals,
+                )
+            except AsrError as exc:
+                if exc.code != "incomplete_transcript":
+                    raise
+                coverage_error = exc
+                audible_end = float(exc.details["audible_speech_end_seconds"])
+                uncovered_speech = int(exc.details["uncovered_speech_interval_count"])
             postprocess_ms = (perf_counter() - postprocess_started) * 1000
-            return TranscriptionResult(
+            transcription = TranscriptionResult(
                 text=text,
                 duration=duration,
                 language=language,
@@ -414,6 +420,10 @@ class _MossWorkerBackend:
                     used_chars=len(context),
                 ),
             )
+            if coverage_error is not None:
+                coverage_error.partial_transcription = transcription
+                raise coverage_error
+            return transcription
     async def transcribe_batch(
         self,
         audio_chunks: list[AudioInput],

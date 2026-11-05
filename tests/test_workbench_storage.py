@@ -93,7 +93,7 @@ def test_old_tasks_require_reset_and_offline_reset_preserves_complete_account_an
     assert preview["file_bytes"] == 21
     assert (tmp_path / "jobs/old/audio.wav").exists()
     result = reset_tasks(tmp_path, apply=True)
-    assert result["preserved_identities_match"] and result["schema_after"] == SCHEMA_VERSION == 5
+    assert result["preserved_identities_match"] and result["schema_after"] == SCHEMA_VERSION == 6
     assert all(count == 0 for count in result["task_rows_after"].values())
     assert not (tmp_path / "jobs").exists() and not (tmp_path / "uploads").exists()
     assert (tmp_path / "models/do-not-touch").read_bytes() == b"model-cache"

@@ -48,6 +48,9 @@ class Settings:
     receive_timeout_seconds: float = 30.0
     multipart_metadata_bytes: int = 256 * 1024
     preprocessing_prefetch: bool = False
+    video_encoder: str = "auto"
+    video_max_fps: int = 15
+    video_inference_grace_seconds: float = 45.0
     log_level: str = "INFO"
     log_format: str = "json"
     log_dir: Path | None = None
@@ -60,6 +63,15 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    video_encoder = os.getenv("ASR_VIDEO_ENCODER", "auto")
+    if video_encoder not in {"auto", "cpu", "nvenc"}:
+        raise ValueError("ASR_VIDEO_ENCODER must be 'auto', 'cpu' or 'nvenc'")
+    video_max_fps = int(os.getenv("ASR_VIDEO_MAX_FPS", "15"))
+    if not 1 <= video_max_fps <= 30:
+        raise ValueError("ASR_VIDEO_MAX_FPS must be between 1 and 30")
+    video_grace = float(os.getenv("ASR_VIDEO_INFERENCE_GRACE_SECONDS", "45"))
+    if not 0 <= video_grace <= 120:
+        raise ValueError("ASR_VIDEO_INFERENCE_GRACE_SECONDS must be between 0 and 120")
     adapter = os.getenv("ASR_ADAPTER", "mock")
     if adapter not in {"mock", "qwen", "registered"}:
         raise ValueError("ASR_ADAPTER must be 'mock', 'qwen' or 'registered'")
@@ -103,6 +115,9 @@ def load_settings() -> Settings:
     if any(value <= 0 for value in workbench_values.values()):
         raise ValueError("ASR_WORKBENCH limits must be positive")
     return Settings(
+        video_encoder=video_encoder,
+        video_max_fps=video_max_fps,
+        video_inference_grace_seconds=video_grace,
         receive_slots=_positive_int("ASR_RECEIVE_SLOTS", 4),
         receive_timeout_seconds=_positive_float("ASR_RECEIVE_TIMEOUT_SECONDS", 30.0),
         multipart_metadata_bytes=_positive_int("ASR_MULTIPART_METADATA_BYTES", 256 * 1024),

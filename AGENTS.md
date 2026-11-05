@@ -11,8 +11,8 @@
 - 使用 Python 3.12、uv、FastAPI、Uvicorn。唯一 LAN 端口 `18080` 同时提供工作台与 API；不新增公网隧道、端口映射，不暴露 worker 端口 `8001` 或历史测试端口。
 - `/v1/**` 使用可选 Bearer、内存 job 和临时输入，默认 `quality_profile=legacy`；重启后不承诺恢复服务端输入。`/api/**` 使用独立个人账户、HttpOnly 会话及服务端归属检查，Bearer 不赋予工作台访问权。
 - 同步、异步、工作台、编辑对齐和模型 load 共用有界单 GPU FIFO，不用同步调用绕过队列。取消等待安全边界；清理文件和资源 lease 后才发布终态。活跃模型卸载进入 `unloading_scheduled`，新同模型调用返回既有 409，不强卸载活跃模型。
-- 工作台当前 schema 为 **5**。**schema 4→5 原位保留账户、任务、MP3、版本、检查点与保留期限，不执行 `workbench_reset_tasks`。** 更早格式的历史边界见[升级指南](docs/guides/upgrading.md)，不能套用旧清库操作。
-- 工作台终态默认保留七天。持久音频为经完整校验的 MP3 192 kbps CBR；ready 元数据提交后才删除原始上传。操作内按需创建受控 PCM，退出时清理；重试不重复编码 MP3。删除不得被晚到结果撤销。
+- 工作台当前 schema 为 **6**。**schema 4/5→6 原位保留账户、任务、MP3、版本、检查点与保留期限，不执行 `workbench_reset_tasks`。** 更早格式的历史边界见[升级指南](docs/guides/upgrading.md)，不能套用旧清库操作。
+- 工作台终态默认保留七天。持久音频为经完整校验的 MP3 192 kbps CBR；音频与所需视频 ready 元数据均提交后才删除原始上传。操作内按需创建受控 PCM，退出时清理；重试不重复编码 MP3。删除不得被晚到结果撤销。
 - 检查点核对 MP3／PCM 摘要、解码规格、模型／流程／参数／词库身份，不匹配明确拒绝，可显式从头重试。保留成功块及恢复预算账本，普通重试不重置额度；缺口结果保持 `failed/quality_incomplete`，完整真实对齐前不提供字幕。
 - 进度只报告阶段与完成 chunk，最终正文以 `result.text` 为准；native long-form 不伪造 chunk 内百分比。能力来自 `/v1/models`；错误保持 `error.code/message/details` 信封。
 
@@ -20,6 +20,8 @@
 
 - 默认 Qwen3-ASR 1.7B，Qwen 与可选 MOSS 使用 HF native `transformers`；不把 `qwen-asr` 包、vLLM、streaming 或未验收后端声明为可用。
 - Qwen 官方 ForcedAligner 是已实现的可选路径，真实验收后才启用 `ASR_ENABLE_QWEN_ALIGNMENT=1`。不得伪造时间戳；独立 `/v1/audio/alignments` 仍是预留接口。
+- 视频默认最高 1080p/15fps，独立单任务队列与转录并行；NVENC p1/CQ 23 与完整输出校验，不增加模型推理并发。音视频资源分别结算，删除等待全部 owner。
+- 工作台 MOSS 原始分块与局部复核持久恢复，按原序重建 Anchor Replay；旧 `/v1` 默认行为不变。未解决声音候选保留部分稿及明确缺口。
 - MOSS 需独立 smoke 并复核 CUDA torch 后启用。段级时间不等于字词对齐；跨块标签读取实际 `speaker_scope`，保留 mixed／partial／unresolved。Anchor Replay 自动生成预算在未显式指定时至少 24000，显式值保持，上限 65536。
 - `quality_v1.4` 基础身份和 `recovery_v1.0` 恢复策略分开记录；词库按任务冻结，只自动规范人工确认的无歧义别名，不补写不确定内容。
 - 六小时是输入上限，`quality_v1.validated=false` 保持。六小时质量、独立参考集、八小时稳定性等未完成项见 [roadmap](docs/development/roadmap.md)；工程或 mock 不能替代。

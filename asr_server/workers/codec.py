@@ -140,6 +140,8 @@ def error_to_payload(error: AsrError) -> dict[str, object]:
         "code": error.code,
         "message": error.message,
         "details": error.details,
+        **({"partial_transcription": result_to_payload(error.partial_transcription)}
+           if error.partial_transcription is not None else {}),
     }
 
 

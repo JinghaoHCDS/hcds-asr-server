@@ -1,8 +1,8 @@
 # HCDS ASR Server PRD
 
-当前契约：schema 5、单端口工作台与 API、单 GPU FIFO。本文定义公共 API 和产品边界；工作台详细行为见[工作台契约](product-workbench.md)，资源／调度见[平台运行契约](asr-platform-runtime.md)，操作方法见[部署](../guides/wsl-deployment.md)与[升级](../guides/upgrading.md)。历史验收不自动覆盖当前版本，未完成质量门槛见 [roadmap](../development/roadmap.md)。
+当前契约：schema 6、单端口工作台与 API、单 GPU FIFO。本文定义公共 API 和产品边界；工作台详细行为见[工作台契约](product-workbench.md)，资源／调度见[平台运行契约](asr-platform-runtime.md)，操作方法见[部署](../guides/wsl-deployment.md)与[升级](../guides/upgrading.md)。历史验收不自动覆盖当前版本，未完成质量门槛见 [roadmap](../development/roadmap.md)。
 
-工作台 `/api/**` 使用独立 Cookie 会话、SQLite 持久任务、七天终态保留、标准 MP3 和操作内 PCM；schema 4→5 保留账户、任务、文件、版本、检查点与保留期限，不执行旧清库流程。恢复以独立 `recovery_v1.0` 策略记录预算、缺口与 attempt fence；`/readyz` 和管理员 drain 管理推理准入，`/health` 保持存活语义。
+工作台 `/api/**` 使用独立 Cookie 会话、SQLite 持久任务、七天终态保留、标准 MP3 和操作内 PCM；schema 4/5→6 保留账户、任务、文件、版本、检查点与保留期限，不执行旧清库流程。恢复以独立 `recovery_v1.0` 策略记录预算、缺口与 attempt fence；`/readyz` 和管理员 drain 管理推理准入，`/health` 保持存活语义。
 
 `/v1/**` 保持可选 Bearer、临时输入和内存 job，默认 `quality_profile=legacy`；显式 Qwen quality 流程不变成持久任务。真实 Qwen 对齐已实现且受启用门槛约束，独立 alignment API、vLLM 和 streaming 仍未提供。六小时输入上限不是质量承诺，`quality_v1.validated=false` 保持。
 
@@ -776,7 +776,9 @@ MCP：
 
 已实现同端口工作台、Qwen／可选 MOSS、模型生命周期、统一 FIFO、内存 job、工作台持久恢复、真实 Qwen 对齐、Context、批量客户端与诊断。每个部署仍须验证实际环境后才启用能力。
 
-未完成质量、长期稳定性、其他客户端／浏览器和环境复现见 [roadmap](../development/roadmap.md)。不把旧 P0／P1 初始化清单作为新任务派发，也不因代码存在宣布质量关闭。vLLM、streaming、其他 ASR、并行 GPU／分布式调度只有明确需求和新契约后进入范围。
+未完成质量、长期稳定性、其他客户端／浏览器和环境复现见 [roadmap](../development/roadmap.md)。不把旧 P0／P1 初始化清单作为新任务派发，也不因代码存在宣布质量关闭。vLLM、streaming、其他 ASR、并行模型推理／分布式调度只有明确需求和新契约后进入范围。
+
+视频标准化使用独立单任务队列，与转录并行；NVENC 默认 p1/CQ 23、最高 1080p/15fps，完整输出校验后提交。工作台 MOSS 持久保存原始分块、重建 Anchor Replay、带预算局部复核；不改旧 `/v1` 默认行为。当前协议见[工作台契约](product-workbench.md)，真实长视频测量见[验证记录](../validation/2026-11-05-media-moss-performance.md)。
 
 ## 13. 参考资料
 

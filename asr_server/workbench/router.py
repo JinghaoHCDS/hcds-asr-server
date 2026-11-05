@@ -1,6 +1,6 @@
 import secrets
 import shutil
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from starlette.types import Scope, Receive, Send
@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from asr_server.config import Settings
+from asr_server.audio.video import VIDEO_PROFILE
 from asr_server.errors import AsrError
 from asr_server.observability import log_stats
 from asr_server.workbench.security import COOKIE_NAME, LoginFailures, check_same_origin, password_executor, password_hash, verify_password
@@ -33,6 +34,8 @@ class CompleteUpload(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=200)
     model: str | None = Field(default=None, max_length=160)
     quality_profile: str | None = Field(default=None, max_length=80)
+    speaker_resolution: Literal["off", "auto", "required"] | None = None
+    expected_speakers: int | None = Field(default=None, ge=1, le=4, strict=True)
 
 
 class RetryJob(BaseModel):
@@ -44,7 +47,13 @@ class DrainRequest(BaseModel):
 
 
 class EditSegment(BaseModel):
-    text: str = Field(max_length=20000)
+    text: str | None = Field(default=None, min_length=1, max_length=20000)
+    speaker_id: str | None = Field(default=None, max_length=80)
+    base_version: int = Field(ge=1)
+
+
+class EditSpeaker(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
     base_version: int = Field(ge=1)
 
 
@@ -121,6 +130,11 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
             "default_model": default_model, "default_quality_profile": default_profile,
             "domains": [{"id": "general", "label": "通用"}, {"id": "ai", "label": "AI／技术内容"}],
             "quality_profiles": [{"id": "legacy", "label": "标准转录"}, {"id": "quality_v1", "label": "质量优先", "validated": False}],
+            "video_retention": {**VIDEO_PROFILE, "max_fps": service.settings.video_max_fps, "encoder_preference": settings.video_encoder,
+                                "inference_grace_seconds": settings.video_inference_grace_seconds,
+                                "nvenc_profile": {"encoder": "h264_nvenc", "preset": "p1", "cq": 23, "rate_control": "vbr"},
+                                "retention_days": settings.workbench_retention_days},
+            "expected_speakers_max": 4,
             "max_upload_bytes": settings.workbench_max_upload_bytes, "chunk_size": CHUNK_SIZE,
             "max_duration_seconds": 21600, "retention_days": settings.workbench_retention_days,
             "storage": {"used_bytes": await service.store.run(service.store.usage, user["id"]), "quota_bytes": settings.workbench_user_quota_bytes},
@@ -224,9 +238,35 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
                     await service.release_playback(job_id)
         return PlaybackResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
+    @router.get("/jobs/{job_id}/video")
+    async def video(job_id: str, user: User) -> FileResponse:
+        path = await service.acquire_playback(user["id"], job_id, video=True)
+        class VideoResponse(FileResponse):
+            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+                try:
+                    await super().__call__(scope, receive, send)
+                finally:
+                    await service.release_playback(job_id)
+        return VideoResponse(path, media_type="video/mp4", headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+    @router.post("/jobs/{job_id}/video/retry", status_code=202)
+    async def retry_video(job_id: str, user: User) -> dict[str, Any]:
+        return await service.retry_video(user["id"], job_id)
+
     @router.patch("/jobs/{job_id}/segments/{segment_id}")
     async def edit(job_id: str, segment_id: str, data: EditSegment, user: User) -> dict[str, Any]:
-        return await service.edit(user["id"], job_id, segment_id, data.text, data.base_version)
+        if data.text is None and "speaker_id" not in data.model_fields_set:
+            raise AsrError(400, "bad_request", "provide text or speaker_id")
+        return await service.edit(user["id"], job_id, segment_id, data.text, data.base_version,
+                                  speaker_id=data.speaker_id, assign_speaker="speaker_id" in data.model_fields_set)
+
+    @router.post("/jobs/{job_id}/speakers")
+    async def create_speaker(job_id: str, data: EditSpeaker, user: User) -> dict[str, Any]:
+        return await service.edit_speaker(user["id"], job_id, data.name, data.base_version)
+
+    @router.patch("/jobs/{job_id}/speakers/{speaker_id}")
+    async def rename_speaker(job_id: str, speaker_id: str, data: EditSpeaker, user: User) -> dict[str, Any]:
+        return await service.edit_speaker(user["id"], job_id, data.name, data.base_version, speaker_id)
 
     @router.get("/jobs/{job_id}/export")
     async def export(job_id: str, user: User, format: str = "txt", version: int | None = None, partial: bool = False) -> Response:
@@ -241,7 +281,12 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
                 "gaps": task.get("gaps", []), "progress": {k:v for k,v in task["progress"].items() if k not in {"text", "chunks"}}}
         else:
             result = await service.store.run(service.store.version, job_id, version) if version is not None else task["result"]
-        text, media_type = await service.store.run(export_result, result, format,
+        from asr_server.workbench.speakers import dialogue_markdown, speaker_view
+        result = speaker_view(result)
+        if format == "md":
+            text, media_type = await service.store.run(dialogue_markdown, result, task["filename"]), "text/markdown"
+        else:
+            text, media_type = await service.store.run(export_result, result, format,
             segment_timestamps=definition.capabilities.segment_timestamps)
         filename = quote(f"{task['filename']}.v{result['version']}.{format}")
         return Response(text, media_type=media_type, headers={
@@ -305,7 +350,7 @@ def install_workbench(app: FastAPI, settings: Settings) -> WorkbenchService:
         service.set_draining(data.draining)
         if not data.draining:
             await service.fill_queue()
-        return {"draining": service.draining, "active_operations": len(service.active),
+        return {"draining": service.draining, "active_operations": len(service.active | set(service.video_tasks)),
             "playback_consumers": sum(service.playback_consumers.values()), "readiness": service.readiness()}
 
     app.include_router(router)

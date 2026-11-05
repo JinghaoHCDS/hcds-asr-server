@@ -5,7 +5,7 @@
 ## 使用指南
 
 - [WSL 部署](guides/wsl-deployment.md)：支持边界、CUDA 门槛、启动与排障。
-- [升级与回滚](guides/upgrading.md)：checkout／发行目录更新，当前 schema 4→5 保留数据及更早版本边界。
+- [升级与回滚](guides/upgrading.md)：checkout／发行目录更新，当前 schema 4/5→6 保留数据及更早版本边界。
 - [MCP bridge](guides/mcp-bridge.md)：客户端 stdio、允许目录与工具。
 - [口播、播客与批量交接](guides/batch-workflow.md)：逐素材 Context、恢复和正式结果目录。
 - [日志与离线诊断](guides/asr-diagnostics.md)：默认不含正文的关联事件和诊断包。
@@ -14,7 +14,7 @@
 ## 当前参考
 
 - [API／产品契约](reference/asr-server-prd.md)：模型能力、生命周期、参数、错误和内存 job。
-- [工作台契约](reference/product-workbench.md)：账户隔离、schema 5、音频／容量、恢复、编辑与导出。
+- [工作台契约](reference/product-workbench.md)：账户隔离、schema 6、视频／音频／容量、恢复、人物校对与导出。
 - [平台运行契约](reference/asr-platform-runtime.md)：资源准入、FIFO、资产、持久化和就绪。
 - [OpenAPI 说明资源](reference/docs-endpoint-capabilities.md)：服务实际读取的 `/docs` 描述；[MCP 指南](guides/mcp-bridge.md)由 `/docs/mcp` 读取。
 
@@ -37,6 +37,10 @@
 原始验收日志、JSON、截图和一次性验证脚本已按维护决定从当前源码树删除，不另做私有副本。精选记录保留方法、指标、失败与限制，并标明其原版本；删除不清除 Git 历史，也不代表已收回外部副本。仓库只分发许可明确的合成样例，自有代码使用 [MIT](../LICENSE)，外部组件与音频生成器见[第三方归属及许可](../THIRD_PARTY_NOTICES.md)。
 
 - [2026-10-28-repository-governance](validation/2026-10-28-repository-governance.md)
+- [2026-11-06-review-layout-deployment](validation/2026-11-06-review-layout-deployment.md)：回看双栏与工具面板前端更新已上线，未重启服务；局域网静态资源与运行版本核对通过。
+- [2026-11-05-video-dialogue-deployment](validation/2026-11-05-video-dialogue-deployment.md)：已授权上线 schema 6；短合成视频、真实 MOSS／Qwen 与正式 HTTP 检查通过，长三人面试质量仍待验证。
+- [2026-11-05-video-nvenc-progress](validation/2026-11-05-video-nvenc-progress.md)：GPU 编码优先、真实阶段进度和已有 schema 6 列表兼容修正已上线；实际面试的覆盖检查失败另记为未完成项。
+- [2026-11-05-video-dialogue-local](validation/2026-11-05-video-dialogue-local.md)：视频与人物校对的本地功能验证。
 - [2026-10-27-workbench-console](validation/2026-10-27-workbench-console.md)
 - [2026-10-26-workbench-audio](validation/2026-10-26-workbench-audio.md)
 - [2026-10-26-transcription-resilience](validation/2026-10-26-transcription-resilience.md)
@@ -63,3 +67,5 @@
 当前规则只在对应 reference 与 AGENTS 维护，其他位置使用链接和必要摘要。指南更新随行为变更；设计说明保留取舍，不保留已完成派发清单。历史验收保留失败与限制，新增证据另建绑定版本摘要，不覆盖旧记录。
 
 移动／删除前检查源码、测试、CI、动态资源、部署和产品包。生成报告写入忽略的 `artifacts/` 或批准的私有位置；只有精选且获准公开的摘要进入 `validation/`。不创建持续增长的公开原始 archive。
+
+- [长视频性能与 MOSS 恢复](validation/2026-11-05-media-moss-performance.md)。

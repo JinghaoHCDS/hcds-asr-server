@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from asr_server.adapters.base import TranscriptionResult
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
@@ -36,6 +39,9 @@ class AsrError(Exception):
         self.code = code
         self.message = message
         self.details = details or {}
+        # Internal recovery payload, deliberately outside the HTTP error envelope
+        # and diagnostic details. Only the owning workbench may persist it.
+        self.partial_transcription: TranscriptionResult | None = None
 
 
 def error_payload(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:

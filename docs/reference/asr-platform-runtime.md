@@ -1,6 +1,6 @@
 # 平台执行与资源契约
 
-当前参考：schema 5、统一单 GPU FIFO、有界正文与 PCM、持久 MP3、分离摘要／正文／chunk 和关联诊断。设计理由见[平台设计](../development/platform-design.md)与[音频设计](../development/audio-storage.md)；历史测量和限制见[平台验收](../validation/2026-10-25-platform.md)。模型策略及质量启用门槛保持各自契约，工程实现不等于 GPU／听感／长音频质量验收。
+当前参考：schema 6、统一单 GPU FIFO、有界正文与 PCM、持久 MP3、分离摘要／正文／chunk 和关联诊断。设计理由见[平台设计](../development/platform-design.md)与[音频设计](../development/audio-storage.md)；历史测量和限制见[平台验收](../validation/2026-10-25-platform.md)。模型策略及质量启用门槛保持各自契约，工程实现不等于 GPU／听感／长音频质量验收。
 
 ## 请求、调度与取消
 
@@ -26,7 +26,7 @@
 
 工作台以 `audio.mp3` 作为持久音频：192 kbps CBR；44.1/48 kHz 源保持，其余转 48 kHz，单/双声道保持，多声道固定混为双声道，记录首条音轨的实际索引及数量。标准化模块与模型预处理分离，不附加降噪、增益或静音裁剪。符合标准的 MP3 需完整检查 MPEG 帧、编码、采样率、声道、解码有效帧数和尾部后才能直接复用；平均码率不能证明 CBR。输出校验考虑编码延迟和尾部填充，不能只比较容器 duration。编码/解码沿用协议白名单、取消、deadline、磁盘与实际字节预算；超过六小时或异常尾部不得提交假 ready。
 
-MP3 使用 partial 和原子重命名，数据库记录 preparing/ready/failed、版本、SHA256、大小、有效时长、时间轴及工具身份；ready 持久化后才删除唯一上传源。失败保留 source，回收 owned partial，重试可重新准备。启动恢复核对 ready 文件存在性与身份，清理无 owner 操作临时文件与无效预留，不从旧 WAV 恢复播放。
+MP3 使用 partial 和原子重命名，数据库记录 preparing/ready/failed、版本、SHA256、大小、有效时长、时间轴及工具身份；音频 ready 持久化且所需视频 ready 后才删除唯一上传源。失败保留 source，回收 owned partial，重试可重新准备。启动恢复核对 ready 文件存在性与身份，清理无 owner 操作临时文件与无效预留，不从旧 WAV 恢复播放。
 
 每次转录或编辑对齐从同一标准 MP3 按选中模型规格生成受控 PCM。`NormalizedAudioAsset` 记录规格、帧数、PCM SHA256、owner 和 `pcm16-wav-v2` 版本；转录、自动复核和初始对齐在一次操作内借用同一资产。借用时核对文件身份、大小及纳秒修改时间，借用者不得删除资产；owner 等所有消费者退出，删除 PCM、分片并结算 lease 后发布终态。重试和编辑对齐重新解码，不重新编码 MP3。编辑对齐先完整解码，再按整数采样窗口取段，避免 MP3 随机截取的帧边界偏移。
 
@@ -36,7 +36,7 @@ MP3 使用 partial 和原子重命名，数据库记录 preparing/ready/failed�
 
 SQLite 使用 WAL；完整 repository 操作通过有界 executor 在线程内建连、执行事务和关闭。密码计算使用独立两槽执行器，等待数量有上限；登录失败地址记录按 TTL 和容量清理。
 
-数据库 schema 5 保存音频元数据、分类容量账本和恢复状态，延续摘要、revision、状态索引、正文 versions 和已完成块 job_chunks 的分离。schema 4→5 事务迁移保留所有数据，不执行 reset；schema <4 的历史格式边界见[升级指南](../guides/upgrading.md)。分块 checkpoint 写入后才发布完成块；普通显示进度至多每秒落盘一次，chunk、取消/删除、版本和终态立即持久化。提交源摘要在每上传锁内计算，离开全局锁，再在短事务中复查上传状态及幂等身份。
+数据库 schema 6 保存音频元数据、分类容量账本和恢复状态，延续摘要、revision、状态索引、正文 versions 和已完成块 job_chunks 的分离。schema 4/5→6 事务迁移保留所有数据，不执行 reset；schema <4 的历史格式边界见[升级指南](../guides/upgrading.md)。分块 checkpoint 写入后才发布完成块；普通显示进度至多每秒落盘一次，chunk、取消/删除、版本和终态立即持久化。提交源摘要在每上传锁内计算，离开全局锁，再在短事务中复查上传状态及幂等身份。
 
 分类为保留文件 `saved_bytes`、文字及版本 `text_bytes`、已落盘操作文件 `temporary_bytes`、未兑现 `reserved_bytes`；前三项相加为 used，used 加未兑现预留为 allocated。准入使用完整 allocated 与磁盘未兑现承诺，不重复加入已经落盘的预留。源文件、MP3 与 PCM 同时存活的峰值受预算保护，删除失败保留实际占用。容量日常查询读账本，目录扫描仅在启动恢复和低频维护。`GET /api/storage` 返回个人分类、quota 和 available；管理员 status 返回全局分类及独立 `disk_free_bytes`。任务摘要同时返回 `audio_size_bytes` 和轻量音频规格；播放接口只提供 ready MP3，`audio/mpeg`、Range、owner 与私有缓存保持。
 
@@ -48,10 +48,18 @@ SQLite 使用 WAL；完整 repository 操作通过有界 executor 在线程内�
 
 新增设置见 [.env.example](../../.env.example)：`ASR_RECEIVE_SLOTS`、`ASR_RECEIVE_TIMEOUT_SECONDS`、`ASR_MULTIPART_METADATA_BYTES`、`ASR_PREPROCESSING_PREFETCH`、`ASR_TEMP_DIR`、`ASR_LOG_LEVEL/FORMAT/DIR`。`ASR_ADAPTER=registered` 是通用注册器入口，旧 `qwen` 配置保持兼容；不会自动启用新生产模型。`.env` 仍仅由部署生成的 systemd unit 读取。
 
-升级与回滚按[版本适用指南](../guides/upgrading.md)执行：隔离验证、排空、等待安全退出、停服务、获准私有备份，再切换匹配源码／前端。当前 4→5 不清任务；旧程序拒绝新 schema，回滚保护新增数据。源码改动不等于线上已切换。测试及发布检查见[测试指南](../development/testing.md)。
+升级与回滚按[版本适用指南](../guides/upgrading.md)执行：隔离验证、排空、等待安全退出、停服务、获准私有备份，再切换匹配源码／前端。当前 4/5→6 不清任务；旧程序拒绝新 schema，回滚保护新增数据。源码改动不等于线上已切换。测试及发布检查见[测试指南](../development/testing.md)。
 
 ## 转录恢复与服务就绪
 
-schema 5 从 schema 4 原位迁移，保留所有现有任务、音频、检查点、正文版本和保留期限。此次升级禁止使用历史 `workbench_reset_tasks`；旧代码拒绝 schema 5，回滚须保存发布后的新增数据并恢复匹配快照。详细恢复协议以[工作台契约](product-workbench.md#转录恢复与服务就绪)为准。
+schema 6 从 schema 4/5 原位迁移，保留所有现有任务、音频、检查点、正文版本和保留期限。此次升级禁止使用历史 `workbench_reset_tasks`；旧代码拒绝 schema 6，回滚须保存发布后的新增数据并恢复匹配快照。详细恢复协议以[工作台契约](product-workbench.md#转录恢复与服务就绪)为准。
 
 工作台持久 attempt/generation fence、基础设施恢复预算、到期重新排队顺序和独立 recovery_v1.0 质量账本共同约束恢复；所有入口仍共用单 GPU FIFO。`/readyz` 使用调度、维护、数据写入及磁盘余量缓存、worker隔离/熔断和排空状态；读取接口继续可用。管理员排空和恢复统计、阶段deadline、维护监督及systemd设置见同一契约与 [.env.example](../../.env.example)。
+
+## schema 6 视频资源
+
+视频使用独立持久队列，最多一个视频任务，与音频准备／转录并行；全部模型调用仍共用单 GPU FIFO。音频准备后为同任务的 NVENC 编码最多让出 45 秒，再启动模型调用；视频未完成也在到期后继续，不以视频 ready 作为转录条件。视频内部最多两路 NVENC 视频编码，采用 CPU 与 NVDEC 分担解码、CUDA 缩放及完整输出解码验证；连续音轨只编码一次。默认 15 fps、p1/CQ 23，具体适用条件与回退以[工作台契约](product-workbench.md#视频回看与人物校对schema-6)为准。
+
+视频的未兑现承诺由 `video_reserved_bytes` 记录，资源键 `video:<job_id>` 与音频的 `job:<job_id>` 分开；数据库总预留仍只计一次。视频落盘按有界块准入，约 4 MiB 批量记账，进度最多每秒落盘一次。音频清理、低频目录核对均避开活跃视频文件；删除等待两个媒体 owner 与播放器消费者。重启回收未提交副本并恢复视频队列，视频重试不延长原终态期限。管理员排空统计涵盖视频任务。
+
+MOSS 工作台恢复复用不可变原始分块与带预算的局部复核结果，按原序重建人物关联；摘要校验、取消边界和恢复身份不变。未解决区间交付部分稿并保持失败状态，不通过减少检查掩盖缺口。

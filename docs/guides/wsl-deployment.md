@@ -220,7 +220,7 @@ Qwen 强制对齐必须先独立完成 GPU smoke 和 Context/反幻觉验收，�
 
 ## 7. 日常启动、停止和更新
 
-当前 schema 4→5 保留全部任务和 MP3，不运行旧清库工具。具体版本、停写备份与匹配回滚见[升级指南](upgrading.md)。以下 Git 更新只用于 checkout；无 `.git` 的发行目录在新目录解包校验后切换，不执行 `git pull`。
+当前 schema 4/5→6 保留全部任务和 MP3，不运行旧清库工具。具体版本、停写备份与匹配回滚见[升级指南](upgrading.md)。以下 Git 更新只用于 checkout；无 `.git` 的发行目录在新目录解包校验后切换，不执行 `git pull`。
 
 在 WSL checkout 中：
 

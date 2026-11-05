@@ -1,12 +1,12 @@
 # 局域网工作台与 Qwen quality_v1
 
-当前工作台使用 schema 5、个人会话和持久 MP3；schema 4→5 保留任务、音频、版本、检查点及保留期限，**不运行 `workbench_reset_tasks`**。本文是[API／产品契约](asr-server-prd.md)的当前工作台参考，资源边界见[运行契约](asr-platform-runtime.md)，历史 MP3 改造理由见[设计说明](../development/audio-storage.md)。旧清库步骤的版本范围只在[升级指南](../guides/upgrading.md)说明，不作为当前维护步骤。
+当前工作台使用 schema 6、个人会话和持久 MP3；schema 4/5→6 保留任务、音频、版本、检查点及保留期限，**不运行 `workbench_reset_tasks`**。本文是[API／产品契约](asr-server-prd.md)的当前工作台参考，资源边界见[运行契约](asr-platform-runtime.md)，历史 MP3 改造理由见[设计说明](../development/audio-storage.md)。旧清库步骤的版本范围只在[升级指南](../guides/upgrading.md)说明，不作为当前维护步骤。
 
 ## 产品与运行边界
 
-默认 Qwen 1.7B、transformers、官方 ForcedAligner；现有 MOSS 保持原策略。网页在 API 的同一 `18080` 端口提供上传音视频、排队、个人任务、回听改字及 TXT/SRT/VTT/JSON 导出，不依赖公网或云服务。前端为 React/TypeScript/Vite 静态产物，生产机器无需运行 Node 服务。
+默认 Qwen 1.7B、transformers、官方 ForcedAligner；MOSS 工作台请求默认开启跨分块关联，旧 `/v1` 默认策略保持。网页在 API 的同一 `18080` 端口提供上传音视频、排队、个人任务、回听改字及 TXT/SRT/VTT/JSON/Markdown 导出，不依赖公网或云服务。前端为 React/TypeScript/Vite 静态产物，生产机器无需运行 Node 服务。
 
-2026-10-25 界面更新：沿用用户 HCDS 雾蓝／卡布里蓝／麦黄／墨灰／纸白主题，GSAP 动效尊重减少动态效果设置。长结果采用固定视口、独立正文／工具滚动、动态高度虚拟列表；支持片段全文搜索、时间跳转及播放跟随，完整复制和导出不受可见行限制。手机端在正文与工具间切换。实现与验收见[工作台 UI 验收](../validation/2026-10-25-workbench-ui.md)。
+工作台界面：沿用用户 HCDS 雾蓝／卡布里蓝／麦黄／墨灰／纸白主题，GSAP 动效尊重减少动态效果设置。长结果采用固定视口、独立正文／工具滚动、动态高度虚拟列表；支持片段全文搜索、时间跳转及播放跟随，完整复制和导出不受可见行限制。回看页可用内容宽度达到 1000px 时采用左侧媒体 42%／右侧全文 58% 双栏，间距 16px，媒体与正文独立滚动；视频按实际比例适配，不裁切或拉伸。窄屏使用上下布局，视频最高占视口 30%，正文列表至少 360px，空间不足允许页面滚动。文件信息默认折叠；人物管理、导出与回听工具在按需打开的右侧面板内，支持 Esc 关闭及焦点返回，打开时不挤压或卸载正文。缺口清单保留在媒体栏，正文明确标注不完整结果。早期界面验收见[工作台 UI 验收](../validation/2026-10-25-workbench-ui.md)。
 
 面向中文口播、课程、访谈、播客和中英混说。最大六小时是输入上限，不代表六小时识别质量已验收。`quality_v1` 初始 60 秒是实验候选；真实开发集、独立验收集通过发布门槛前，旧调用默认保持 `legacy`。
 
@@ -14,7 +14,7 @@
 
 ## 质量流程
 
-1. 选择首条音轨，生成或严格校验复用标准 MP3，保留有效时间轴；识别时从同一 MP3 创建临时 PCM，视频原文件在音频提交 ready 后删除。
+1. 选择首条音轨，生成或严格校验复用标准 MP3，保留有效时间轴；识别时从同一 MP3 创建临时 PCM，视频原文件在音频与压缩视频均提交 ready 后删除。
 2. 完整覆盖切分，在目标附近寻找低能量切点，不因检测到静音就丢弃输入。候选目标 30/60/90/120/180 秒，比较零重叠和边界两侧上下文，单次输入不超过 180 秒。
 3. 每块使用任务冻结的词库快照；默认不传播上一块全文。自动生成预算 4096，EOS 提前结束；显式限制保持原值。
 4. 截断、疑似循环、空白语音区、边界冲突及疑似术语问题有界复核；独立恢复共享持久动作／音频账本，具体门槛见[恢复与就绪](#转录恢复与服务就绪)。未完成区间不得静默变成 completed。
@@ -43,15 +43,15 @@
 
 持久音频为 `audio.mp3`，界面显示“高质量回听 · MP3 192 kbps”。源采样率为 44.1/48 kHz 时保持，其余转为 48 kHz；单/双声道保持，多声道使用固定规则混为双声道。保存实际音轨索引、有效时长、编码规格、实际大小、SHA256、时间轴及工具身份；多音轨素材提示所用首条音轨。此处理不额外降噪、响度归一化、增强增益或裁剪静音，不恢复低质源已丢失的细节。
 
-MP3 必须完整解码并通过帧、规格、尾部与有效时长校验；符合标准的 MP3 可直接复用，判断不能只依赖扩展名或平均码率。标准文件经 partial 原子提交并持久化 `audio_asset.state=ready` 后才删除唯一 source；转换失败或取消尚未 ready 时保留 source，重试重新准备。ready 后失败或取消仍保留 MP3 和有效检查点。首次转录、重试、自动复核及初始字幕对齐共用一次操作内的 PCM；编辑对齐独立预留空间，完整受控解码后按整数采样窗口取段，不做 MP3 随机截取。操作结束清理 PCM、分片、partial 和 lease 后才发布终态，下一次操作按需重建，MP3 不重复编码。启动恢复检查 ready 文件身份并回收无 owner 临时文件。
+MP3 必须完整解码并通过帧、规格、尾部与有效时长校验；符合标准的 MP3 可直接复用，判断不能只依赖扩展名或平均码率。标准文件经 partial 原子提交并持久化 `audio_asset.state=ready`；视频素材还须 `video_asset.state=ready`，纯音频须确认无视频流，之后才删除唯一 source；转换失败或取消尚未 ready 时保留 source，重试重新准备。ready 后失败或取消仍保留 MP3 和有效检查点。首次转录、重试、自动复核及初始字幕对齐共用一次操作内的 PCM；编辑对齐独立预留空间，完整受控解码后按整数采样窗口取段，不做 MP3 随机截取。操作结束清理 PCM、分片、partial 和 lease 后才发布终态，下一次操作按需重建，MP3 不重复编码。启动恢复检查 ready 文件身份并回收无 owner 临时文件。
 
 默认容量：单个上传 8 GiB、每用户保留区 16 GiB、全局 64 GiB、磁盘余量 5 GiB、最长六小时。限制均可配置。到达容量限制拒绝新上传，不删除未到期任务来凑空间。已完成/失败/取消任务在终态七天后清理，可提前删除。未提交上传也需要过期回收，避免永久占用配额。
 
-容量账本分为 `saved_bytes`（保留文件）、`text_bytes`（文字与版本）、`temporary_bytes`（已落盘临时占用）和 `reserved_bytes`（未兑现预留）；`used_bytes` 为前三者之和，`allocated_bytes` 再加未兑现预留，可分配余量为配额减 allocated。分类互斥，不能把已落盘预留再次计费。转换峰值计入 source、MP3 及操作 PCM，192 kbps 仅用于估算，边界由实际字节及帧数检查；删除失败不得提前结算释放。轮询直接查账本，不扫描文件目录。管理端物理磁盘余量单独展示。上传、提交、终态、取消、对齐完成、删除和页面重新可见时刷新轻量统计。
+容量账本分为 `saved_bytes`（保留文件）、`text_bytes`（文字与版本）、`temporary_bytes`（已落盘临时占用）和 `reserved_bytes`（未兑现预留）；`used_bytes` 为前三者之和，`allocated_bytes` 再加未兑现预留，可分配余量为配额减 allocated。分类互斥，不能把已落盘预留再次计费。转换峰值计入 source、MP3、视频与封装临时副本及操作 PCM，192 kbps 仅用于估算，边界由实际字节及帧数检查；删除失败不得提前结算释放。轮询直接查账本，不扫描文件目录。管理端物理磁盘余量单独展示。上传、提交、终态、取消、对齐完成、删除和页面重新可见时刷新轻量统计。
 
 保留数据与推理临时目录分离；临时分片和预处理副本用后删除。主动取消等待模型安全边界，不强杀当前推理。删除等待活跃消费者安全退出，再清音频、检查点、规范稿、原稿和全部编辑版本，不能让晚到的模型结果复活已删除任务。
 
-文本按片段修改，携带 `base_version` 做乐观锁。只重新对齐受影响片段，新版本对齐未完成时禁止导出新 SRT/VTT；可回到已完成的旧版本导出。编辑不隐式改变公共词库。
+文本和人物归属按片段修改，携带 `base_version` 做乐观锁。Qwen 改字只重新对齐受影响片段，新版本对齐未完成时禁止导出新 SRT/VTT；可回到已完成的旧版本导出。编辑不隐式改变公共词库。
 
 ## API 扩展
 
@@ -61,7 +61,7 @@ MP3 必须完整解码并通过帧、规格、尾部与有效时长校验；符�
 - `/api/jobs`：个人列表及音频实际大小；`/api/jobs/{id}`：查询/删除，详情包含 `audio_asset` 准备状态与编码规格；`POST .../cancel|retry`：取消/重试，retry 可传 `{ "from_start": true }`。
 - `GET /api/jobs/{id}/audio`：ready 后返回 `audio/mpeg`，支持 Range、归属隔离及私有缓存；准备中返回 `409 audio_not_ready`，不回退到 source 或临时 PCM。
 - `GET /api/storage`：个人分类占用、配额和剩余可分配量，不查询模型能力；管理端 `/api/admin/status.storage` 返回全局分类与物理磁盘余量。
-- `PATCH /api/jobs/{id}/segments/{segment_id}`：带版本的改字；`GET .../export?format=txt|srt|vtt|json&version=N`：指定版本导出。
+- `PATCH /api/jobs/{id}/segments/{segment_id}`：带版本的改字；`GET .../export?format=txt|srt|vtt|json|md&version=N`：指定版本导出。
 - `/api/admin/users`、`/api/admin/users/{id}`：账户；`/api/admin/glossary`：词库；`/api/admin/status`：队列与容量。
 
 错误沿用现有 error envelope。前端不显示服务器文件路径、模型内部状态细节或虚构模型内部进度。实际模型能力仍从 registry 的 `/v1/models` 同源发现。
@@ -97,7 +97,7 @@ uv run uvicorn asr_server.main:app --host 0.0.0.0 --port 18080
 
 源码／运行发行包、依赖、前端和数据必须可对应。先完成 CPU／mock、类型与生产构建，再在获授权的独立 WSL 代码和数据目录验收实际 CUDA、模型、对齐和 MP3。源码支持、隔离演练和生产实际执行分别记录。
 
-当前 schema 4→5 保留数据，不清空任务。切换前 drain、等待安全退出、停服务，使用批准的私有位置保存一致备份及旧源码／前端；恢复时核对逐文件 manifest 与 `source.source_digest`。旧程序不能直接读 schema 5，也不能用旧备份覆盖升级后的新增数据。完整操作和版本边界见[升级指南](../guides/upgrading.md)。
+当前 schema 4/5→6 保留数据，不清空任务。切换前 drain、等待安全退出、停服务，使用批准的私有位置保存一致备份及旧源码／前端；恢复时核对逐文件 manifest 与 `source.source_digest`。旧程序不能直接读 schema 6，也不能用旧备份覆盖升级后的新增数据。完整操作和版本边界见[升级指南](../guides/upgrading.md)。
 
 ```bash
 # 本地产品包：先完成前端构建；不包含运行数据、凭据、node_modules或原始验收材料
@@ -108,7 +108,7 @@ uv run python -m scripts.workbench_release bundle --output artifacts/releases/ne
 
 ## 转录恢复与服务就绪
 
-工作台 schema 5 从 schema 4 事务迁移，保留全部现有任务、MP3、检查点、正文版本与保留期限；**此次升级不得运行 `workbench_reset_tasks`**。更早 schema 的音频迁移限制仍按对应旧版发布说明执行。旧程序会拒绝 schema 5，回滚必须保留新运行数据并使用匹配源码/前端/数据快照，不能用旧备份覆盖发布后的新增结果。
+工作台 schema 6 从 schema 4/5 事务迁移，保留全部现有任务、MP3、检查点、正文版本与保留期限；**此次升级不得运行 `workbench_reset_tasks`**。更早 schema 的音频迁移限制仍按对应旧版发布说明执行。旧程序会拒绝 schema 6，回滚必须保留新运行数据并使用匹配源码/前端/数据快照，不能用旧备份覆盖发布后的新增结果。
 
 基础 `quality_v1.4` 身份保持正常模型生成和切分不变，恢复记录以独立 `recovery_v1.0` 绑定原基础指纹。旧成功块摘要核对后只读复用，旧失败调用由持久错误及原时间窗口显式导入。恢复预算继承旧账本：每原始块最多三个动作（有依据的语言恢复、二分、四分；正常合并复核也占同一动作上限），总复核音频不超过首次输入的 30%。预算先落盘再调用；短音频额度不足时明确停止。普通重试和服务重启不会重新赠送额度。
 
@@ -127,3 +127,34 @@ uv run python -m scripts.workbench_release bundle --output artifacts/releases/ne
 设计理由见[恢复设计](../development/transcription-recovery.md)，尚未完成门槛见 [roadmap](../development/roadmap.md)。真实推理、故障注入、持续运行和六小时质量分开报告；未测项目不能由源码或一次 smoke 替代。
 
 声音检测没有取得阴性证据不等于确定存在人声或漏词；音乐、音效、呼吸及检测不可用须保持未分类/具体失败原因。声音疑点在界面显示“待回听确认”，不把整个处理块当作已证明遗漏的台词区间。离线 `inspect_speech_evidence` 提供双视图概率摘要和原因，不授权将未知区间放行为完整结果。见[本轮验收](../validation/2026-10-26-transcription-resilience.md)。
+
+## 视频回看与人物校对（schema 6）
+
+新增视频任务保留 `video.mp4` 和既有 `audio.mp3`。首条非封面视频流与首条音轨转为 H.264/yuv420p，长短边不超过 1920/1080、不放大；默认最高 **15 fps**，`ASR_VIDEO_MAX_FPS=1..30` 可调整。AAC 128 kbps、MP4 faststart。`ASR_VIDEO_ENCODER=auto` 实际试编码后选择 NVENC（p1/hq、VBR、CQ 23），不可用时回退 libx264（CRF 22、fast、两线程）；`cpu`／`nvenc` 可强制指定，强制 GPU 不可用时明确失败。两种质量参数不表示等价画质或体积。HDR 输入保留 source 并报告不支持。识别继续使用 MP3 派生 PCM，视频 AAC 不作为识别源。
+
+视频使用独立持久队列，最多一个视频任务，与音频准备和单 GPU FIFO 内的转录并行；视频失败不会阻止转录。可用 NVDEC 时使用硬件解码、缩放与输出解码检查。无旋转、方形像素、音画及容器起点均为零、超过 120 秒且至少 8 个 CPU 的输入采用两路视频编码：一路 CPU 解码（最多 12 线程）及 CUDA 缩放，一路 NVDEC 解码缩放，均用 NVENC 编码。首路对恒定帧率、源帧率至少为目标四倍的 H.264 在降帧时跳过非参考中间帧，其余输入完整解码后降帧。音频连续编码一次，视频在整秒处拼接，避免音轨切片造成衔接间隙。其他输入保留单路和原时间关系。该优化不提高模型推理并发。音频准备完成后，如本任务仍在 NVENC 编码，模型首次调用最多等待 `ASR_VIDEO_INFERENCE_GRACE_SECONDS`（默认 45 秒，范围 0..120，0 关闭）；编码结束或等待到期立即继续转录，界面显示“音频已就绪，等待 GPU 空闲”。这是有上限的资源协调，视频失败或缓慢不构成转录前提；不保证所有文件或系统负载均在两分钟内完成。
+
+每条输出轨在编码过程中完整解码；分片最长两秒，避免长音轨的管道封装错误。最终 faststart 重封装后核对媒体包 SHA256、时长、规格及音画起点，再原子提交；CPU 回退保留独立源／输出全解码。所有副本在写入前预留，音频和视频各有独立资源 owner，完成任一项不能释放或重新计费另一项。只有 MP3 和所需视频均 ready 才删除 source。视频失败保留 source，视频重试不重做 MP3、不变更结果版本及七天期限。
+
+`video_asset` 状态为 pending/queued/preparing/ready/failed/not_applicable/unavailable；包含 SHA256、大小、时长、宽高、实际编码／解码策略、分阶段耗时、音轨索引和 `audio_offset_seconds`。播放映射为 `video.currentTime = transcriptTime + audio_offset_seconds`。旧任务没有视频时继续回听，不能从已删除 source 补回视频。
+
+视频 `progress` 独立于转录：FFmpeg 帧数／时间提供当前阶段百分比、已处理和总时长；未知进度显示等待，不伪造模型内部百分比。转录和视频同时运行时界面分别显示进度；转录终态后若视频仍 queued/preparing，列表及详情继续轮询。视频取消、删除、过期、排空及停机均等待媒体 owner 退出，再清理文件与资源。
+
+- `GET /api/jobs/{id}/video`：同账户验证、Range 和私有响应；非 ready 为 409，不直接播放 source。
+- `POST /api/jobs/{id}/video/retry`：终态且 source 存在时排队，仅重做视频。状态独立于转录；详情会继续轮询 queued/preparing。
+- 上传完成增加 `speaker_resolution=off|auto|required`、可选 `expected_speakers=1..4`。MOSS 默认 auto，冻结 `max_new_tokens=65536`；其他模型默认 off。人数只用于提示，不强行合并人物。旧 `/v1` 默认参数不变。
+- 结果版本内 `speakers` 为稳定 P 编号到名称及来源的映射。片段 `speaker_id` 为有效归属，`model_speaker_id` 保留首次模型映射；旧 speaker/source_speaker/speaker_scope 字段保持。局部编号依块分开，候选与未确定状态保持可见。
+- `PATCH .../segments/{segment_id}` 接受 text 和/或 speaker_id（null 表示待确认）以及 base_version。`POST .../speakers` 创建人物，`PATCH .../speakers/{speaker_id}` 改名，均接受 name、base_version。只能修改已完成且无待完成对齐的版本；冲突 409，修改原子生成新版本。
+- 改人物不调用 GPU。MOSS 改字沿用段级时间并标记 text_edited，不声明逐字对齐；Qwen 改字仍重新对齐。改名不改片段身份，历史版本保留历史名字。
+- `export?format=md&version=N` 导出 UTF-8 对话稿：文件名、版本、完整性、人物表、时间与发言。相邻同人间隔最多 2 秒、合并后最多 60 秒/800 字符；不跨重叠、缺口或待确认归属合并，不生成摘要。完整 JSON 保留人物与修改来源；其他格式兼容。
+
+部署与真实长面试测量见[本轮验证](../validation/2026-11-05-media-moss-performance.md)。人物关联仍可能 partial/mixed；流程完成不表示人工质量确认。
+
+
+## MOSS 持久恢复与局部复核
+
+工作台 MOSS 使用 `moss-recovery-v1` 检查点，冻结规范 PCM 身份、模型、请求、词库、生成上限、分块窗口和恢复版本。每次模型原始输出及覆盖异常原子保存并校验摘要；重试按原顺序回放原始结果重建 Anchor Replay，不能用跨块同号或已改写正文恢复声纹身份。身份不一致明确拒绝，旧的纯文字 chunk 不能冒充完整 MOSS 检查点。
+
+对于不超过两秒的未覆盖声音候选，使用同一 MOSS 模型复核前后四秒上下文及最多四个人的参考声音。每原始块最多三次、全任务复核音频不超过输入 30%；调用前持久扣账，中断与普通重试不返还预算。只有有真实时间的新增片段覆盖候选且不覆盖原有正文时才接纳；参考归属冲突或无法映射时保留待确认，不改原声学判断阈值。
+
+无法解决的候选及较长缺口保存完整范围，继续后续块；最终以 `failed/quality_incomplete` 保存可读部分稿及版本，不能宣布完整。原稿、失败详情与复核稿均私有保留；公共错误信封不携带内部原稿。完整 JSON 保留恢复方法、复核消耗与未解决缺口。旧 `/v1` 默认行为和显式生成预算不变。

@@ -263,7 +263,7 @@ output/
 
 工作台只允许普通用户访问自己的任务。删除覆盖音频、检查点与全部编辑版本。恢复时核对 MP3 摘要、解码规范、PCM 摘要、模型、流程、词库和参数；不匹配则拒绝混用旧检查点，可选择“从头重试”，未完成的模型调用需重做。两条路径的推理临时文件均及时清理。
 
-**当前 schema 4→5 原位保留任务及文件，不执行 `workbench_reset_tasks`。** 其他历史版本、停机备份和匹配回滚见[升级指南](docs/guides/upgrading.md)。
+**当前 schema 4/5→6 原位保留任务及文件，不执行 `workbench_reset_tasks`。** 其他历史版本、停机备份和匹配回滚见[升级指南](docs/guides/upgrading.md)。
 
 配置从 [.env.example](.env.example)开始。systemd 自动读取项目 `.env`；直接启动 Uvicorn 需显式设置环境变量或传 `--env-file .env`。代码默认 `ASR_ADAPTER=mock`，真实部署使用 `qwen`。对齐与 MOSS 默认关闭，独立验收后再启用。
 
